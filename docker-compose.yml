@@ -1,44 +1,21 @@
 services:
   installer:
     image: ghcr.io/biohazard786/warpdrop-cli-installer:latest
-    expose:
-      - "8000"
+    ports:
+      - "127.0.0.1:8000:8000"
     restart: unless-stopped
     networks:
       - web
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.installer.rule=Host(`install.${DOMAIN}`)"
-      - "traefik.http.routers.installer.entryPoints=websecure"
-      - "traefik.http.routers.installer.tls.certresolver=le"
-      - "traefik.http.services.installer.loadbalancer.server.port=8000"
-      - "traefik.http.services.installer.loadbalancer.healthcheck.path=/health"
-      - "traefik.http.services.installer.loadbalancer.healthcheck.interval=5s"
-      # --- NEW: "Piggyback" Rules for TURN Certificate ---
-      # This router handles traffic for turn.warpdrop.qzz.io only to generate the cert
-      # - "traefik.http.routers.turn-cert-gen.rule=Host(`turn.${DOMAIN}`)"
-      # - "traefik.http.routers.turn-cert-gen.entryPoints=websecure"
-      # - "traefik.http.routers.turn-cert-gen.tls.certresolver=le"
-      # Reuse the existing installer service definition
-      # - "traefik.http.routers.turn-cert-gen.service=installer"
 
   backend:
     image: ghcr.io/biohazard786/warpdrop-backend:latest
     environment:
       - PORT=8080
-    expose:
-      - "8080"
+    ports:
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
     networks:
       - web
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.backend.rule=Host(`${DOMAIN}`) && PathPrefix(`/ws`)"
-      - "traefik.http.routers.backend.entryPoints=websecure"
-      - "traefik.http.routers.backend.tls.certresolver=le"
-      - "traefik.http.services.backend.loadbalancer.server.port=8080"
-      - "traefik.http.services.backend.loadbalancer.healthcheck.path=/health"
-      - "traefik.http.services.backend.loadbalancer.healthcheck.interval=5s"
 
   frontend:
     image: ghcr.io/biohazard786/warpdrop-frontend:latest
@@ -49,8 +26,8 @@ services:
       # - NEXT_PUBLIC_TURN_SERVER=${NEXT_PUBLIC_TURN_SERVER:-turn.${DOMAIN}}
       # - NEXT_PUBLIC_TURN_USERNAME=${NEXT_PUBLIC_TURN_USERNAME:-warpdrop}
       # - NEXT_PUBLIC_TURN_PASSWORD=${NEXT_PUBLIC_TURN_PASSWORD:-warpdrop-secret}
-    expose:
-      - "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/"]
       interval: 10s
@@ -59,13 +36,6 @@ services:
     restart: unless-stopped
     networks:
       - web
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`${DOMAIN}`)"
-      - "traefik.http.routers.frontend.entryPoints=websecure"
-      - "traefik.http.routers.frontend.tls.certresolver=le"
-      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
-      - "traefik.http.routers.frontend.middlewares=secure-headers@file"
 
   # coturn:
   #   image: coturn/coturn:latest
@@ -77,77 +47,16 @@ services:
   #     - "60000-60128:60000-60128/udp"
   #   volumes:
   #     - ./deploy/turnserver.conf:/etc/coturn/turnserver.conf
-  #     - coturn_certs:/etc/coturn/certs
   #   restart: unless-stopped
   #   networks:
   #     - web
   #   environment:
   #     - DETECT_EXTERNAL_IP=yes
   #     - DETECT_RELAY_IP=yes
-  #   depends_on:
-  #     certs-dumper:
-  #       condition: service_healthy
-
-  # certs-dumper:
-  #   image: ldez/traefik-certs-dumper:latest
-  #   entrypoint: sh -c '
-  #     echo "[$(date "+%Y-%m-%d %H:%M:%S")] Waiting for acme.json and certificates...";
-  #     while ! [ -e /data/acme.json ]
-  #     || ! [ `jq ".[] | .Certificates | length" /data/acme.json | jq -s "add"` != 0 ]; do
-  #     sleep 1
-  #     ; done
-  #     && echo "[$(date "+%Y-%m-%d %H:%M:%S")] Certificates found! Starting traefik-certs-dumper in watch mode..."
-  #     && traefik-certs-dumper file --version v3 --source /data/acme.json --dest /certs --domain-subdir=true --watch --post-hook "sh /hook.sh ${DOMAIN}"'
-  #   healthcheck:
-  #     test:
-  #       [
-  #         "CMD",
-  #         "sh",
-  #         "-c",
-  #         "[ -r /certs/turn.${DOMAIN}/certificate.crt ] && [ -r /certs/turn.${DOMAIN}/privatekey.key ]",
-  #       ]
-  #     interval: 5s
-  #     timeout: 3s
-  #     retries: 5
-  #   volumes:
-  #     - traefik_letsencrypt:/data
-  #     - coturn_certs:/certs
-  #     - ./deploy/certs-dumper-hook.sh:/hook.sh:ro
-  #   restart: unless-stopped
-  #   networks:
-  #     - web
-
-  traefik:
-    image: traefik:latest
-    command:
-      - "--api.dashboard=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entryPoints.web.address=:80"
-      - "--entryPoints.websecure.address=:443"
-      - "--providers.file.directory=/etc/traefik/dynamic"
-      - "--entryPoints.web.http.redirections.entryPoint.to=websecure"
-      - "--entryPoints.web.http.redirections.entryPoint.scheme=https"
-      - "--certificatesResolvers.le.acme.httpChallenge.entryPoint=web"
-      - "--certificatesResolvers.le.acme.email=${ACME_EMAIL}"
-      - "--certificatesResolvers.le.acme.storage=/letsencrypt/acme.json"
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik_letsencrypt:/letsencrypt
-      - ./deploy/traefik_dynamic.yml:/etc/traefik/dynamic/traefik_dynamic.yml:ro
-    restart: unless-stopped
-    networks:
-      - web
+  #   # NOTE: TURN over TLS (port 5349) needs certificates at /etc/coturn/certs.
+  #   # Easiest path: point your host Caddy/Nginx at turn.${DOMAIN} so it provisions
+  #   # a cert, then mount the cert files into this container via an extra volume.
 
 networks:
   web:
-    external: false
-
-volumes:
-  traefik_letsencrypt:
-    external: false
-  coturn_certs:
     external: false

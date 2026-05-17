@@ -55,13 +55,16 @@ You run `warpdrop receive lantern-poppy-brave-peter` and the file flies into you
 
 Don't trust my Oracle instance? Good. I wouldn't either.
 
+WarpDrop ships the three services (frontend, backend, installer) and **expects you to bring your own reverse proxy** — most people already have Caddy or Nginx running globally on their box, so bundling another one would just start a turf war over port 443.
+
 1.  **Copy the env**: `cp .env.example .env`
 2.  **Fill it out**: `DOMAIN=yourstuff.com`, etc.
-3.  **Launch**: `docker compose up -d --build`
+3.  **Launch**: `docker compose up -d`
+4.  **Point your proxy** at `127.0.0.1:3000` (frontend), `127.0.0.1:8080` (backend `/ws`), and `127.0.0.1:8000` (installer).
 
-See [DEPLOY.md](DEPLOY.md) for the "I need to configure Nginx manually because I enjoy pain" guide.
+See [DEPLOY.md](DEPLOY.md) for ready-to-paste Caddy and Nginx snippets.
 
-> **Pro Tip**: You really need the TURN server (included in the docker-compose) if you want this to work between system behind symmetric NATs. Without it, you're at the mercy of the NAT gods.
+> **Pro Tip**: You really need a TURN server (the commented `coturn` block in `docker-compose.yml`) if you want this to work between systems behind symmetric NATs. Without it, you're at the mercy of the NAT gods.
 
 ---
 

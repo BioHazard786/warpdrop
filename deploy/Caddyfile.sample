@@ -1,0 +1,32 @@
+# Sample Caddyfile for WarpDrop
+# Drop this into your global Caddy config (usually /etc/caddy/Caddyfile)
+# and replace YOUR_DOMAIN with your actual domain.
+#
+# Caddy handles HTTPS automatically via Let's Encrypt — no extra flags needed.
+# Make sure ports 80 and 443 are open and your domain's A record points here.
+
+# --- Main App (frontend + backend WebSocket) ---
+YOUR_DOMAIN {
+	# WebSocket signaling backend
+	handle /ws* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# Everything else goes to the Next.js frontend
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# Recommended security headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "no-referrer-when-downgrade"
+	}
+}
+
+# --- Installer (curl | bash endpoint) ---
+install.YOUR_DOMAIN {
+	reverse_proxy 127.0.0.1:8000
+}
