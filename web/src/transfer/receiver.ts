@@ -237,7 +237,10 @@ export class ReceiverClient {
       unregister()
       this.session = null
       this.transport = null
-      if (r.status === "done") return this.end("done")
+      if (r.status === "done") {
+        await session.waitPeerClose(2000)
+        return this.end("done")
+      }
       if (r.status === "failed") {
         const reason = REASONS[r.reason] ?? r.reason
         return this.end("failed", reason, r.reason)

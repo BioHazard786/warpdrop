@@ -203,29 +203,27 @@ func RenderTransferSummary(summary TransferSummary) {
 /* -------------------------------------------------------------------------- */
 
 type RoomInfo struct {
-	RoomID   string
-	RoomLink string
+	Code string // "4821-amber-otter-kite-moth"
+	Link string
 }
 
-func NewRoomInfo(roomID, roomLink string) *RoomInfo {
-	return &RoomInfo{
-		RoomID:   roomID,
-		RoomLink: roomLink,
-	}
-}
+func NewRoomInfo(code, link string) *RoomInfo { return &RoomInfo{Code: code, Link: link} }
 
 func (r *RoomInfo) View() string {
-	content := fmt.Sprintf("%s Room Created!\n\n%s Room ID: %s\n%s Room Link: %s", IconSuccess, IconCopy, BoldStyle.Foreground(Primary).Render(r.RoomID), IconWeb, MutedStyle.Render(r.RoomLink))
-
-	box := SuccessBoxStyle
-
-	if w := boxContentWidth(box, content); w > terminalWidth() {
-		box = box.Width(terminalWidth() - 2)
+	rows := []string{
+		fmt.Sprintf("%s Code:    %s", IconCopy, BoldStyle.Foreground(Primary).Render(r.Code)),
+		fmt.Sprintf("%s Link:    %s", IconWeb, r.Link),
+		fmt.Sprintf("%s Receive: %s", IconReceive, "warpdrop receive "+r.Code),
 	}
+	content := fmt.Sprintf("%s Ready to share\n\n%s", IconSuccess, strings.Join(rows, "\n"))
 
+	// Size the box to its content. If even that does not fit the terminal, skip the box: a wrapped link inside a
+	// border cannot be copied, while plain soft-wrapped text can.
+	box := SuccessBoxStyle.UnsetWidth()
+	if boxContentWidth(box, content) > terminalWidth() {
+		return content
+	}
 	return box.Render(content)
 }
 
-func RenderRoomInfo(roomID, roomLink string) {
-	fmt.Println(NewRoomInfo(roomID, roomLink).View())
-}
+func RenderRoomInfo(code, link string) { fmt.Println(NewRoomInfo(code, link).View()) }

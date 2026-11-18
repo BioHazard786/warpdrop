@@ -75,9 +75,9 @@ func validateSingleFile(path string) (FileInfo, error) {
 		return FileInfo{}, fmt.Errorf("%s: is a directory (directories not yet supported)", path)
 	}
 
-	// Check if file is empty
-	if stat.Size() == 0 {
-		return FileInfo{}, fmt.Errorf("%s: file is empty", path)
+	// Empty files are fine (protocol v2 sends them), but only regular files: a FIFO or /dev/zero also reports size 0
+	if !stat.Mode().IsRegular() {
+		return FileInfo{}, fmt.Errorf("%s: not a regular file", path)
 	}
 
 	// Check if file is readable

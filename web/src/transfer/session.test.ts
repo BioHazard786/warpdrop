@@ -312,3 +312,15 @@ describe("driver faults fail loudly", () => {
     expect(await x.sRes).toMatchObject({ status: "failed", byPeer: true })
   })
 })
+
+describe("graceful shutdown", () => {
+  it("the sender closes after the last confirmation and the receiver sees it, so the final frame is never cut off", async () => {
+    const x = rig([fileFrom(0, "x", pattern(1000))])
+    expect(await x.sRes).toEqual({ status: "done" })
+    expect(await x.rRes).toEqual({ status: "done" })
+    const t0 = Date.now()
+    await x.r.waitPeerClose(2000)
+    expect(Date.now() - t0).toBeLessThan(500) // resolved by the sender's close, not by the timeout
+    expect(x.st.closed).toBe(true)
+  })
+})

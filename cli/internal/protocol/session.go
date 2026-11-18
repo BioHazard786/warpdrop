@@ -265,6 +265,7 @@ func (s *sender) apply(ctx context.Context, e SEffect) *Result {
 			s.o.OnFileDone(e.Idx)
 		}
 	case SFxComplete:
+		_ = s.t.Close() // the receiver already has everything and has confirmed it; it waits for this close before leaving
 		return &Result{Status: StatusDone}
 	case SFxAbort:
 		if e.Reason == ReasonClosed {
@@ -564,3 +565,15 @@ func (r *receiver) apply(e REffect) ([]REvent, *Result) {
 }
 
 func hexDecode(s string) ([]byte, error) { return hex.DecodeString(s) }
+
+// WaitPeerClose blocks until the peer closes the transport (or timeout). A receiver calls it after finishing so the
+// last frame it sent (the final file_done) is flushed before it tears the connection down.
+func WaitPeerClose(t Transport, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	for {
+		if _, err := t.Recv(ctx); err != nil {
+			return
+		}
+	}
+}

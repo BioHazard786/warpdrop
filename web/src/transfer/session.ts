@@ -240,6 +240,7 @@ export class SenderSession {
         break
       case "complete":
         this.finish({ status: "done" })
+        this.t.close() // the receiver confirmed the last file and waits for this close before leaving, so nothing is lost
         break
       case "abort":
         if (fx.reason === "closed") this.finish({ status: "closed" })
@@ -360,6 +361,8 @@ export class ReceiverSession {
   private resolve!: (r: Result) => void
   private result = new Promise<Result>((r) => (this.resolve = r))
   private chain: Promise<void> = Promise.resolve()
+  private onPeerClosed!: () => void // declared first: a later field declaration would reset the assignment below
+  private peerClosed = new Promise<void>((r) => (this.onPeerClosed = r))
   private o: ReceiverOptions
   private t: Transport
   private st: ReceiveState
@@ -368,6 +371,11 @@ export class ReceiverSession {
     this.o = o
     this.t = o.transport
     this.st = o.state
+  }
+
+  /** After finishing, wait (briefly) for the sender to close so our last frame is flushed before we hang up. */
+  waitPeerClose(ms: number): Promise<void> {
+    return Promise.race([this.peerClosed, new Promise<void>((r) => setTimeout(r, ms))])
   }
 
   cancel() {
@@ -397,7 +405,10 @@ export class ReceiverSession {
     void this.result.finally(() => clearInterval(watchdog))
     inbox.setHandler((w) => {
       last = Date.now()
-      if (w === null) return this.enqueue({ e: "closed" })
+      if (w === null) {
+        this.onPeerClosed()
+        return this.enqueue({ e: "closed" })
+      }
       if (typeof w !== "string") return this.enqueue({ e: "chunk", n: w.length }, w)
       const f = parseFrame(w)
       this.enqueue(f ? { e: "frame", f } : { e: "bad" })

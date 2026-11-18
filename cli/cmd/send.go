@@ -1,156 +1,138 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"sync"
+	"time"
 
-	"github.com/BioHazard786/Warpdrop/cli/internal/config"
 	"github.com/BioHazard786/Warpdrop/cli/internal/files"
-	"github.com/BioHazard786/Warpdrop/cli/internal/signaling"
+	"github.com/BioHazard786/Warpdrop/cli/internal/protocol"
 	"github.com/BioHazard786/Warpdrop/cli/internal/transfer"
 	"github.com/BioHazard786/Warpdrop/cli/internal/ui"
+	"github.com/BioHazard786/Warpdrop/cli/internal/utils"
 	"github.com/spf13/cobra"
 )
 
-var (
-	flagDomain   string
-	flagSTUN     string
-	flagTURN     string
-	flagTURNUser string
-	flagTURNPass string
-	flagRelay    bool
-)
+var flagKeepOpen bool
 
 var sendCmd = &cobra.Command{
-	Use:     "send",
+	Use:     "send <files...>",
 	Aliases: []string{"s"},
-	Short:   "Send files to a receiver",
-	Long: `Send files directly to a receiver using WebRTC technology.
+	Short:   "Send files to a browser or another CLI",
+	Long: `Send files directly to a receiver. Share the printed code or link; the receiver can use the
+web app or "warpdrop receive". The words after the number never reach the server.
 
 Examples:
-  warpdrop send file1.txt file2.pdf
-  warpdrop send --domain custom.example.com file.txt
-  warpdrop send --relay file.txt`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return fmt.Errorf("no files specified")
+  warpdrop send report.pdf photo.jpg
+  warpdrop send --keep-open big.iso     # serve several receivers
+  warpdrop send --relay file.zip        # force the encrypted relay`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error { return runSend(cmd.Context(), args) },
+}
+
+func deviceName() string {
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		h = "terminal"
+	}
+	return protocol.DisplayName(h) + " (CLI)"
+}
+
+func runSend(ctx context.Context, paths []string) error {
+	infos, err := files.ValidateFiles(paths)
+	if err != nil {
+		return err
+	}
+	srcs := make([]protocol.Source, len(infos))
+	items := make([]ui.FileTableItem, len(infos))
+	for i, f := range infos {
+		fh, err := os.Open(f.Path)
+		if err != nil {
+			return err
 		}
-		return sendFiles(args)
-	},
-}
-
-func sendFiles(filePaths []string) error {
-	stopSpinner := ui.RunSpinner("Validating files...")
-	defer stopSpinner()
-	fileInfos, err := files.ValidateFiles(filePaths)
-	if err != nil {
-		return err
-	}
-	stopSpinner()
-
-	displayFileTable(fileInfos)
-
-	cfg, err := LoadConfig(config.Options{
-		Domain:     flagDomain,
-		STUNServer: flagSTUN,
-		TURNServer: flagTURN,
-		TURNUser:   flagTURNUser,
-		TURNPass:   flagTURNPass,
-		ForceRelay: flagRelay,
-	})
-	if err != nil {
-		return err
-	}
-
-	fmt.Println()
-	stopSpinner = ui.RunConnectionSpinner("Connecting to server...")
-	defer stopSpinner()
-	ctx, err := NewConnectionContext(cfg)
-	if err != nil {
-		return err
-	}
-	defer ctx.Close()
-	stopSpinner()
-
-	roomID, err := createRoom(ctx)
-	if err != nil {
-		return err
-	}
-
-	displayRoomInfo(roomID, cfg)
-
-	peerInfo, err := waitForPeer(ctx)
-	if err != nil {
-		return err
-	}
-	ctx.PeerInfo = peerInfo
-
-	fileInfoPtrs := prepareFileData(fileInfos)
-
-	session, err := CreateSenderSession(ctx, fileInfoPtrs)
-	if err != nil {
-		return transfer.NewError("create session", err)
-	}
-
-	return RunSenderSession(session, nil)
-}
-
-func displayFileTable(fileInfos []files.FileInfo) {
-	items := make([]ui.FileTableItem, len(fileInfos))
-	for i, f := range fileInfos {
-		items[i] = ui.FileTableItem{Index: i + 1, Name: f.Name, Size: f.Size, Type: f.Type}
+		defer fh.Close()
+		srcs[i] = protocol.Source{Entry: protocol.FileEntry{ID: i, Name: f.Name, Size: f.Size, Type: f.Type}, R: fh}
+		items[i] = ui.FileTableItem{Index: i + 1, Name: protocol.DisplayName(f.Name), Size: f.Size, Type: f.Type}
 	}
 	fmt.Println()
 	ui.RenderFileTable(items)
-}
 
-func displayRoomInfo(roomID string, cfg *config.Config) {
-	ui.RenderRoomInfo(roomID, cfg.GetRoomLink(roomID))
-}
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	stop := ui.RunConnectionSpinner("Connecting to server...")
+	srv, err := cfg.Fetch(ctx)
+	stop()
+	if err != nil {
+		return err
+	}
 
-func createRoom(ctx *ConnectionContext) (string, error) {
-	ctx.Client.SendMessage(&signaling.Message{
-		Type:       signaling.MessageTypeCreateRoom,
-		ClientType: "cli",
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	m := &meter{}
+	go m.Run(runCtx)
+
+	var (
+		mu        sync.Mutex
+		delivered bool
+		seen      = map[string]string{} // peer -> last printed status
+		code      string
+	)
+	err = transfer.RunSend(runCtx, cfg, srv, srcs, deviceName(), transfer.SendHooks{
+		OnRoom: func(room, secret string) {
+			code = room + "-" + secret
+			fmt.Println()
+			ui.RenderRoomInfo(code, cfg.ShareLink(room, secret))
+			fmt.Println()
+			ui.PrintInfo("Waiting for a receiver... (Ctrl-C to stop)")
+		},
+		OnStatus: func(msg string) { m.Clear(); ui.PrintWarning(msg) },
+		OnPeer: func(v transfer.PeerView) {
+			mu.Lock()
+			defer mu.Unlock()
+			if v.Status == "sending" {
+				m.Update(v.Device, v.Sent, v.Total)
+				return
+			}
+			key := v.Status + "/" + v.Transport
+			if seen[v.ID] == key {
+				return
+			}
+			seen[v.ID] = key
+			m.Clear()
+			via := map[string]string{"rtc": "direct", "relay": "relay", "": ""}[v.Transport]
+			switch v.Status {
+			case "authenticating":
+				ui.PrintInfof("%s connected (%s), verifying...", v.Device, via)
+			case "done":
+				delivered = true
+				ui.PrintSuccessf("Delivered %d file(s), %s, to %s", len(srcs), utils.FormatSize(v.Total), v.Device)
+				if !flagKeepOpen {
+					go func() { time.Sleep(200 * time.Millisecond); cancel() }() // let the final frames land
+				}
+			case "failed":
+				ui.PrintErrorf("%s: %s", v.Device, v.Reason)
+			}
+		},
+		OnPeerGone: func(id string) { mu.Lock(); delete(seen, id); mu.Unlock() },
 	})
-
-	select {
-	case roomID := <-ctx.Handler.RoomCreated:
-		return roomID, nil
-	case errMsg := <-ctx.Handler.Error:
-		return "", transfer.WrapError("create room", transfer.ErrSignalingError, errMsg)
+	m.Clear()
+	_ = code
+	if err != nil {
+		return err
 	}
-}
-
-func waitForPeer(ctx *ConnectionContext) (*signaling.PeerInfo, error) {
-	fmt.Println()
-	stopSpinner := ui.RunWaitingSpinner("Waiting for receiver to join...")
-	defer stopSpinner()
-
-	select {
-	case peerInfo := <-ctx.Handler.PeerJoined:
-		return peerInfo, nil
-	case errMsg := <-ctx.Handler.Error:
-		return nil, transfer.WrapError("wait for peer", transfer.ErrSignalingError, errMsg)
+	mu.Lock()
+	defer mu.Unlock()
+	if !delivered {
+		return errInterrupted
 	}
-}
-
-func prepareFileData(fileInfos []files.FileInfo) []*files.FileInfo {
-	ptrs := make([]*files.FileInfo, len(fileInfos))
-
-	for i := range fileInfos {
-		ptrs[i] = &fileInfos[i]
-	}
-
-	return ptrs
+	return nil
 }
 
 func init() {
 	rootCmd.AddCommand(sendCmd)
-
-	sendCmd.Flags().StringVarP(&flagDomain, "domain", "d", "", "Custom domain")
-	sendCmd.Flags().StringVarP(&flagSTUN, "stun", "s", "", "Custom STUN server")
-	sendCmd.Flags().StringVarP(&flagTURN, "turn", "t", "", "Custom TURN server")
-	sendCmd.Flags().StringVarP(&flagTURNUser, "turn-user", "u", "", "TURN username")
-	sendCmd.Flags().StringVarP(&flagTURNPass, "turn-pass", "p", "", "TURN password")
-	sendCmd.Flags().BoolVarP(&flagRelay, "relay", "r", false, "Force relay mode")
+	sendCmd.Flags().BoolVarP(&flagKeepOpen, "keep-open", "k", false, "Keep serving after the first delivery (up to 10 receivers)")
 }
