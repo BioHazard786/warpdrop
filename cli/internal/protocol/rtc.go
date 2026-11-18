@@ -132,7 +132,8 @@ func (t *RTCTransport) Recv(ctx context.Context) (Wire, error) {
 }
 
 // closeGrace bounds how long Close waits for queued data to leave before tearing the connection down.
-const closeGrace = time.Second
+// A cancel can sit behind megabytes of queued file data, so a slow runner needs more than a second to flush it.
+const closeGrace = 3 * time.Second
 
 // Close ends the link without losing what was just sent (a final cancel or file_done). Closing only the data channel
 // first makes SCTP deliver queued data before it resets the stream; we wait for that to finish, then drop the connection.
