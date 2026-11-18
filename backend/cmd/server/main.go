@@ -1,39 +1,61 @@
 package main
 
 import (
-	"log"
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/BioHazard786/Warpdrop/backend/internal/config"
 	"github.com/BioHazard786/Warpdrop/backend/internal/server"
-	"github.com/BioHazard786/Warpdrop/backend/internal/signaling"
+	"github.com/BioHazard786/Warpdrop/backend/web"
 )
 
-// Health Check endpoint
-func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Signaling server is healthy."))
-}
-
 func main() {
+	healthcheck := flag.Bool("healthcheck", false, "probe /healthz on the local server and exit (for distroless images)")
+	flag.Parse()
+	cfg := config.Load()
 
-	// 1. Create the Hub
-	hub := signaling.NewHub()
+	if *healthcheck {
+		c := http.Client{Timeout: 2 * time.Second}
+		resp, err := c.Get("http://127.0.0.1:" + cfg.Port + "/healthz")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		return
+	}
 
-	// 2. Run the Hub in a separate goroutine
-	// This starts the hub's main event loop (the 'select' statement)
-	go hub.Run()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	s, h := server.New(cfg, web.FS())
+	stop := make(chan struct{})
+	go s.Janitor(stop)
 
-	// 3. Register our handlers
-	http.HandleFunc("/health", healthCheckHandler)
+	srv := &http.Server{
+		Addr:              net.JoinHostPort("", cfg.Port),
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	go func() {
+		<-ctx.Done()
+		close(stop)
+		sd, c := context.WithTimeout(context.Background(), 10*time.Second)
+		defer c()
+		_ = srv.Shutdown(sd)
+	}()
 
-	// Get the ServeWs handler function (which includes the hub as a dependency)
-	// and register it for the "/ws" route
-	http.HandleFunc("/ws", server.ServeWs(hub))
-
-	// 4. Start the server
-	port := ":8080"
-	log.Printf("Starting signaling server on http://localhost%s", port)
-
-	log.Fatal(http.ListenAndServe(port, nil))
+	slog.Info("listening", "addr", srv.Addr, "relay", cfg.RelayEnabled, "turn", cfg.TURNSecret != "")
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }

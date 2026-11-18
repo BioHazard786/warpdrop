@@ -16,15 +16,18 @@ Web and CLI implement the same spec; `fixtures/` holds the shared test data (reg
 
 ## 2. Signaling (WebSocket `/ws`, JSON text frames)
 
+Every JSON frame, signaling or transfer, carries its type in `t`. The sender's peer id is always `"sender"`.
+
 | Direction | Message |
 |---|---|
 | client → server | `create_room {v:2, client}` |
 | server → sender | `room_created {room_id, token}` |
-| sender → server | `resume_room {room_id, token}` (30 s grace after a drop, then receivers get `room_closed`) |
+| sender → server | `resume_room {room_id, token}` → `room_resumed {room_id, peers:[peer_id]}`. After a drop the room lives 30 s, then receivers get `room_closed`. |
+| sender → server | `close_room` (e.g. after 3 failed authentications) → everyone gets `room_closed` |
 | receiver → server | `join_room {v:2, room_id, client}` |
 | server → receiver | `joined {peer_id}` |
 | server → sender | `peer_joined {peer_id, client}` |
-| either → server | `signal {to, payload}`; server delivers `signal {from, payload}`. A receiver may only signal the sender. |
+| either → server | `signal {to, payload}`; server delivers `signal {from, payload}`. A receiver may only signal the sender: its `to` is ignored. |
 | either → server | `relay_request {to}`; server sends `relay_ticket {peer_id, ticket}` to both |
 | server → client | `peer_left {peer_id}`, `room_closed`, `error {code, message}` |
 

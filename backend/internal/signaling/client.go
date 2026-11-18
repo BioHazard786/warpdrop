@@ -1,123 +1,107 @@
 package signaling
 
 import (
-	"log"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 const (
-	// Time allowed to write a message to the peer.
-	writeWait = 10 * time.Second
-
-	// Time allowed to read the next pong message from the peer.
-	pongWait = 60 * time.Second
-
-	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
-
-	// Maximum message size allowed from peer.
-	maxMessageSize = 64 * 1024 // 64 KB - enough for WebRTC SDP messages
+	writeWait  = 10 * time.Second
+	pongWait   = 60 * time.Second
+	pingEvery  = 30 * time.Second
+	readLimit  = 32 << 10
+	sendBuffer = 64
+	maxBad     = 10
 )
 
-// Client is a wrapper for a single websocket connection (a peer)
+// Client is one WebSocket connection. Its send channel is never closed, so a send can never panic;
+// done is closed exactly once and tells the write pump to stop.
 type Client struct {
-	// hub is a pointer to the hub that manages this client.
-	Hub *Hub
+	hub  *Hub
+	conn *websocket.Conn
+	ip   string
+	out  chan []byte
+	done chan struct{}
+	once sync.Once
 
-	// conn is the websocket connection.
-	Conn *websocket.Conn
-
-	// roomID is the ID of the room the client is in.
-	RoomID string
-
-	// send is a buffered channel for all outbound messages.
-	// We write to this channel, and a separate goroutine (writePump)
-	// reads from it and writes to the websocket.
-	Send chan *Message
-
-	// Client metadata for protocol negotiation
-	ClientType string // "cli" or "web"
+	// guarded by hub.mu
+	room   *Room
+	peerID string
 }
 
-// ReadPump pumps messages from the websocket connection to the hub.
-//
-// The application runs ReadPump in a per-connection goroutine. The application
-// ensures that there is at most one reader on a connection by executing all
-// reads from this goroutine.
-func (c *Client) ReadPump() {
-	// When this function exits (e.g., connection closes), unregister the client
-	defer func() {
-		c.Hub.Unregister <- c
-		c.Conn.Close()
-	}()
+func NewClient(h *Hub, conn *websocket.Conn, ip string) *Client {
+	return &Client{hub: h, conn: conn, ip: ip, out: make(chan []byte, sendBuffer), done: make(chan struct{})}
+}
 
-	c.Conn.SetReadLimit(maxMessageSize)
-	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.Conn.SetPongHandler(func(string) error {
-		c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-		return nil
-	})
-
-	// Loop forever, reading messages from the connection
-	for {
-		// Read a message as JSON
-		var msg Message
-		err := c.Conn.ReadJSON(&msg)
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
-			}
-			break // Break the loop on error
-		}
-
-		// Attach the client pointer to the message
-		msg.client = c
-
-		// Send the message to the hub's broadcast channel for processing
-		c.Hub.Broadcast <- &msg
+// send never blocks: a client that cannot keep up is dropped instead of stalling the hub.
+func (c *Client) send(b []byte) {
+	select {
+	case c.out <- b:
+	default:
+		c.close()
 	}
 }
 
-// WritePump pumps messages from the hub to the websocket connection.
-//
-// A goroutine running WritePump is started for each connection. The
-// application ensures that there is at most one writer to a connection by
-// executing all writes from this goroutine.
-func (c *Client) WritePump() {
-	ticker := time.NewTicker(pingPeriod)
+func (c *Client) close() {
+	c.once.Do(func() {
+		close(c.done)
+		_ = c.conn.Close()
+	})
+}
 
-	// When this function exits, stop the ticker and close the connection
+// Serve runs the connection until it ends. It blocks, so call it from the HTTP handler.
+func (c *Client) Serve() {
+	go c.writePump()
+	c.readPump()
+}
+
+func (c *Client) readPump() {
 	defer func() {
-		ticker.Stop()
-		c.Conn.Close()
+		c.close()
+		c.hub.leave(c)
 	}()
-
+	c.conn.SetReadLimit(readLimit)
+	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+	bad := 0
 	for {
-		select {
-		// Case 1: We have a message to send from our 'send' channel
-		case message, ok := <-c.Send:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok {
-				// The hub closed the channel.
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+		mt, data, err := c.conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		if mt != websocket.TextMessage {
+			if bad++; bad >= maxBad {
 				return
 			}
+			c.send(errMsg(ErrBadRequest, "text frames only"))
+			continue
+		}
+		c.hub.handle(c, data)
+	}
+}
 
-			// Write the message to the websocket
-			err := c.Conn.WriteJSON(message) // Write the Message struct as JSON
-			if err != nil {
-				log.Printf("error writing json: %v", err)
-				return // Exit on write error
+func (c *Client) writePump() {
+	t := time.NewTicker(pingEvery)
+	defer t.Stop()
+	defer c.close()
+	for {
+		select {
+		case b := <-c.out:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if c.conn.WriteMessage(websocket.TextMessage, b) != nil {
+				return
 			}
-
-		// Case 2: The ticker's timer has fired, so we send a ping
-		case <-ticker.C:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return // Exit on ping error
+		case <-t.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if c.conn.WriteMessage(websocket.PingMessage, nil) != nil {
+				return
 			}
+		case <-c.done:
+			return
 		}
 	}
 }
