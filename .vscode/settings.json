@@ -1,45 +1,30 @@
 {
-	"editor.defaultFormatter": "esbenp.prettier-vscode",
-	"[javascript]": {
-		"editor.defaultFormatter": "biomejs.biome"
-	},
-	"[typescript]": {
-		"editor.defaultFormatter": "biomejs.biome"
-	},
-	"[javascriptreact]": {
-		"editor.defaultFormatter": "biomejs.biome"
-	},
-	"[typescriptreact]": {
-		"editor.defaultFormatter": "biomejs.biome"
-	},
-	"[json]": {
-		"editor.defaultFormatter": "biomejs.biome"
-	},
-	"[jsonc]": {
-		"editor.defaultFormatter": "biomejs.biome"
-	},
-	"[css]": {
-		"editor.defaultFormatter": "biomejs.biome"
-	},
-	"[graphql]": {
-		"editor.defaultFormatter": "biomejs.biome"
-	},
-	"typescript.tsdk": "node_modules/typescript/lib",
 	"editor.formatOnSave": true,
 	"editor.formatOnPaste": true,
+	"typescript.tsdk": "web/node_modules/typescript/lib",
 	"emmet.showExpandedAbbreviation": "never",
-	"editor.codeActionsOnSave": {
-		"source.fixAll.biome": "explicit",
-		"source.organizeImports.biome": "explicit",
-		"source.fixAll": "never",
-		"source.organizeImports": "never",
-		"source.sortImports": "never"
+	"[javascript]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
 	},
-	"biome.lsp.bin": "frontend/node_modules/.bin/biome.exe",
+	"[typescript]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"[javascriptreact]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"[typescriptreact]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"[json]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"[jsonc]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"[css]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
 	"[go]": {
 		"editor.defaultFormatter": "golang.go"
-	},
-	"[snippets]": {
-		"editor.defaultFormatter": "vscode.json-language-features"
 	}
 }

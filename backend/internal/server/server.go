@@ -49,6 +49,11 @@ func New(cfg config.Config, spa fs.FS) (*Server, http.Handler) {
 		tickets = s.relay
 	}
 	s.hub = signaling.NewHub(tickets)
+	if k := cfg.RateScale; k > 0 && k != 1 {
+		s.hub.Create = ratelimit.NewIP(10*k, max(1, int(5*k)))
+		s.hub.Join = ratelimit.NewIP(30*k, max(1, int(10*k)))
+		s.hub.Relay = ratelimit.NewIP(30*k, max(1, int(10*k)))
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ws", s.serveWS)

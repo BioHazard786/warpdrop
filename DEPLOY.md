@@ -1,143 +1,111 @@
 # Deploying WarpDrop
 
-So you've decided to self-host. You brave, beautiful soul. Here is how you run WarpDrop on your own iron without losing your mind (hopefully).
+One container does everything: the web app, signaling, the encrypted relay and `/api/config`. You bring a reverse proxy (Caddy or Nginx) for HTTPS.
 
-## The Stack
+## The stack
 
-The `docker-compose.yml` runs three containers:
+| Service | Bound to | What it is |
+|---|---|---|
+| `warpdrop` | `127.0.0.1:8080` | The app: web UI, `/ws`, `/relay/`, `/api/config`, `/healthz` |
+| `installer` | `127.0.0.1:8000` | The `curl \| bash` endpoint for the CLI |
+| `coturn` | host network | **Optional** TURN server, only with `--profile turn` |
 
-| Service       | Bound to          | What it is                                      |
-| ------------- | ----------------- | ----------------------------------------------- |
-| **Frontend**  | `127.0.0.1:3000`  | Next.js UI                                      |
-| **Backend**   | `127.0.0.1:8080`  | Go signaling server (WebSocket at `/ws`)        |
-| **Installer** | `127.0.0.1:8000`  | The `curl \| bash` endpoint                     |
-
-**No bundled reverse proxy.** WarpDrop assumes you already have Caddy, Nginx, or similar running on the host — fighting for port 443 with your existing setup is nobody's idea of a good time. Ports are bound to `127.0.0.1` so only a same-host proxy can reach them.
-
-**TURN server**: not enabled by default. ~90% of users don't need it, and configuring it is a headache. See section 4 if your friends can't connect.
-
----
+Nothing binds a public port: a same-host proxy is the only way in.
 
 ## Prerequisites
 
-1.  **A Server**: A VPS, a Raspberry Pi, or an old laptop under your bed.
-2.  **A Domain**: A real domain (e.g., `cool-file-sharing.com`) pointing to your server's IP.
-3.  **Docker & Docker Compose**: If you don't have this, stop here and go learn Docker.
-4.  **A reverse proxy on the host**: Caddy or Nginx, already serving traffic on 443.
+1. A server with Docker and Docker Compose.
+2. A domain pointing at it (browsers need HTTPS for WebRTC and the download service worker).
+3. Caddy or Nginx on the host, serving 443.
 
----
-
-## 1. The 30-Second Setup
-
-This assumes you are root or have sudo powers.
+## 1. Run it
 
 ```bash
-# 1. Clone the repo (duh)
-git clone https://github.com/BioHazard786/warpdrop.git
-cd warpdrop
-
-# 2. Setup config
-cp .env.example .env
-
-# 3. Edit the config
-nano .env
-# Set DOMAIN to your actual domain.
-```
-
----
-
-## 2. Launch the Containers 🚀
-
-```bash
+git clone https://github.com/BioHazard786/warpdrop.git && cd warpdrop
+cp .env.example .env          # optional: every setting has a working default
 docker compose up -d
+curl -s http://127.0.0.1:8080/healthz        # ok
+curl -s http://127.0.0.1:8080/api/config     # {"v":2,"iceServers":[...],"relay":true,...}
 ```
 
-Now the three services are running on localhost, waiting for a proxy to talk to them.
+To pin a release instead of `latest`, set `WARPDROP_VERSION=2.0.0` in `.env`.
+
+## 2. Hook up your proxy
+
+### Caddy
+
+[`deploy/Caddyfile.sample`](deploy/Caddyfile.sample): replace `YOUR_DOMAIN`, reload Caddy. It gets certificates itself and handles the WebSocket upgrades on `/ws` and `/relay/` without extra settings.
+
+### Nginx
+
+[`deploy/nginx.conf.sample`](deploy/nginx.conf.sample): replace `YOUR_DOMAIN`, add your certificate paths (certbot works), then `nginx -t && systemctl reload nginx`. Two parts matter and must stay:
+
+- `/ws` and `/relay/` need the `Upgrade`/`Connection` headers, or signaling and the relay silently break.
+- `proxy_buffering off` on those locations, so relayed file data streams instead of piling up in Nginx.
+
+### Anything else
+
+Proxy everything on `YOUR_DOMAIN` to `127.0.0.1:8080` with WebSocket upgrade support, set `Host` and `X-Forwarded-For`, and give relay connections a long read timeout (an hour is fine).
+
+Both samples were validated with `caddy validate` / `nginx -t`, and a transfer through the Nginx sample over TLS was byte-verified.
+
+## 3. Settings
+
+All optional. Set them in `.env` (compose passes them to the container).
+
+| Variable | Default | What it does |
+|---|---|---|
+| `RELAY` | `on` | The encrypted WebSocket relay used when direct WebRTC fails. `off` disables it. |
+| `RELAY_MAX_MBPS` | `0` | Per-connection relay speed cap in megabits per second. `0` = unlimited. |
+| `RELAY_MAX_CONNS` | `200` | Simultaneous relayed transfers (each is two sockets). |
+| `ALLOWED_ORIGINS` | empty | Extra browser origins allowed to open `/ws`, comma separated. The site's own host is always allowed. The CLI sends no origin and is always allowed. |
+| `TRUSTED_PROXIES` | `127.0.0.1,172.16.0.0/12` | Peers whose `X-Forwarded-For` is trusted, so rate limits see the real client IP. The default covers a host proxy reaching the container through Docker's bridge. **Set this to your proxy's address if it isn't on this host.** |
+| `RATE_LIMIT_SCALE` | `1` | Multiplies the per-IP limits (below). Raise it when many people share one address. |
+| `STUN_URLS` | Google STUN | STUN servers, comma separated. |
+| `TURN_URLS`, `TURN_SECRET` | empty | TURN is offered to clients only when **both** are set. |
+
+### Rate limits
+
+Per client IP: **10 new rooms per minute (burst 5)**, 30 joins per minute (burst 10), 30 relay requests per minute (burst 10), and 20 simultaneous connections. They exist so room numbers can't be guessed or the server flooded. If an office, school or carrier-grade NAT puts hundreds of users behind one address, they share these limits: set `RATE_LIMIT_SCALE=5` (or more).
+
+Behind a proxy, rate limiting is only per real user if `TRUSTED_PROXIES` is correct. If it is wrong, everyone appears to come from the proxy's address and shares one limit.
+
+## 4. TURN (optional)
+
+You usually don't need it: when a direct connection fails, WarpDrop automatically relays through the app itself, with the same end-to-end encryption. Run TURN only if you want to keep transfers peer-to-peer across strict NATs, or to take relay bandwidth off the app server.
+
+1. Pick a secret: `openssl rand -hex 32`.
+2. In `.env`:
+   ```
+   TURN_SECRET=<the secret>
+   TURN_REALM=turn.example.com
+   TURN_EXTERNAL_IP=203.0.113.10                    # the server's public IP
+   TURN_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
+   ```
+3. Open **3478 (TCP and UDP)** and **49160-49200 (UDP)** in your firewall, and point `turn.example.com` at the server.
+4. `docker compose --profile turn up -d`
+
+There are no static TURN users. The app hands every client a **time-limited credential** (24 hours) derived from `TURN_SECRET`, so nothing secret ships in the web bundle.
+
+The shipped `deploy/turnserver.conf` is hardened and was tested against a real coturn: the relay **refuses to connect to private, loopback, link-local (including cloud metadata `169.254.169.254`) and CGNAT addresses**, so a TURN credential can't be used to reach your internal network. It also caps concurrent allocations (100), allocations per user (12) and per-session speed (100 Mbit/s). Wrong or expired credentials are rejected. `docker compose --profile turn up` refuses to start without `TURN_SECRET`, `TURN_REALM` and `TURN_EXTERNAL_IP`.
+
+TLS (`turns:` on 5349) is off by default because it needs certificates. To enable it, mount your certificate and key, remove `no-tls`/`no-dtls` from `deploy/turnserver.conf`, and add `cert=` and `pkey=` lines.
+
+## 5. Updating
 
 ```bash
-curl http://127.0.0.1:3000   # frontend
-curl http://127.0.0.1:8080/health   # backend
-curl http://127.0.0.1:8000/health   # installer
+docker compose pull && docker compose up -d
 ```
 
-If those respond, you're halfway there.
-
----
-
-## 3. Hook Up Your Reverse Proxy
-
-Pick your fighter.
-
-### Option A: Caddy (the easy mode)
-
-Caddy provisions Let's Encrypt certs for you automatically. There's a sample at [`deploy/Caddyfile.sample`](deploy/Caddyfile.sample). Drop it into your global Caddyfile (usually `/etc/caddy/Caddyfile`), replace `YOUR_DOMAIN`, and reload:
-
-```bash
-sudo caddy reload --config /etc/caddy/Caddyfile
-```
-
-The shape of it:
-
-```caddy
-YOUR_DOMAIN {
-    handle /ws* { reverse_proxy 127.0.0.1:8080 }
-    handle     { reverse_proxy 127.0.0.1:3000 }
-}
-
-install.YOUR_DOMAIN {
-    reverse_proxy 127.0.0.1:8000
-}
-```
-
-WebSocket upgrades, HTTPS, and HTTP→HTTPS redirects all "just work" — that's the whole point of Caddy.
-
-### Option B: Nginx (the configurable mode)
-
-Sample at [`deploy/nginx.conf.sample`](deploy/nginx.conf.sample). Copy it into `/etc/nginx/sites-available/warpdrop`, symlink to `sites-enabled`, replace `YOUR_DOMAIN`, then get certs with certbot:
-
-```bash
-sudo certbot --nginx -d YOUR_DOMAIN -d install.YOUR_DOMAIN
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-The Nginx sample already handles WebSocket upgrades for the `/ws` location — don't strip that part out or transfers will silently break.
-
-### Option C: Some Other Proxy
-
-Three things your config MUST do or nothing will work and you'll cry:
-
-1.  Forward `/` to `127.0.0.1:3000`.
-2.  Forward `/ws` to `127.0.0.1:8080` **with WebSocket upgrade headers** (`Upgrade`, `Connection`).
-3.  Forward `install.YOUR_DOMAIN` to `127.0.0.1:8000`.
-
-Also set the `Host` header and `X-Forwarded-Proto: https`.
-
----
-
-## 4. The "My Friends Can't Connect" Mode (Enabling TURN)
-
-If file transfers fail between different networks (e.g., WiFi to 4G), your NAT is being difficult. You need a TURN server.
-
-1.  **Open `docker-compose.yml`** and uncomment the `coturn` service.
-2.  **Update `.env`**: set `NEXT_PUBLIC_TURN_SERVER`, `NEXT_PUBLIC_TURN_USERNAME`, and `NEXT_PUBLIC_TURN_PASSWORD`. Uncomment the matching `NEXT_PUBLIC_TURN_*` lines inside the `frontend` block of `docker-compose.yml`.
-3.  **Provision a TLS cert for `turn.YOUR_DOMAIN`** with your host proxy (point an A record at the server and add a stub vhost in Caddy/Nginx — Caddy will fetch the cert on first request). Mount the resulting cert files into `/etc/coturn/certs` inside the `coturn` container.
-4.  **Open the TURN ports** on your firewall (UFW / cloud security group):
-    - `3478` (TCP & UDP)
-    - `5349` (TCP & UDP)
-    - `60000-60128` (UDP — relay range)
-
-Then restart:
-
-```bash
-docker compose up -d coturn
-```
-
----
+v2 is not compatible with v1: update the server and the CLI together.
 
 ## Troubleshooting
 
-- **"It says 404"**: Did you set `DOMAIN` correctly in `.env` AND in your proxy config?
-- **"SSL Error"**: Caddy — check `journalctl -u caddy`. Nginx — check `sudo certbot certificates`. Either way, Let's Encrypt needs port 80 reachable.
-- **"Transfer stuck at 0%"**: You almost certainly need the TURN server. See step 4.
-- **"WebSocket disconnects immediately"**: Your proxy isn't forwarding upgrade headers on `/ws`. Re-read the sample config.
-- **"Connection refused on 3000/8080/8000"**: The containers bind to `127.0.0.1` only. If your proxy lives on a *different* host, edit `docker-compose.yml` to drop the `127.0.0.1:` prefix from the `ports` mappings — then make damn sure your firewall blocks those ports from the public internet.
+- **Transfers connect but never move / "WebSocket disconnects immediately"**: the proxy isn't forwarding upgrade headers on `/ws` and `/relay/`.
+- **`rate_limited` for everyone**: many users behind one IP (raise `RATE_LIMIT_SCALE`), or `TRUSTED_PROXIES` doesn't match your proxy so all users look like one.
+- **"A direct connection could not be made and the relay is disabled"**: you set `RELAY=off` and the peers need relaying. Re-enable it or add TURN.
+- **Works on Wi-Fi, fails on mobile data**: that's what the relay (on by default) and TURN are for. Check `/api/config` shows `"relay":true`.
+- **Browser console shows `Content Security Policy` errors**: something in front is rewriting responses or stripping headers. The app sets its own CSP; don't override it.
+- **Downloads of large files fail in Safari**: Safari buffers in memory; use Chrome, Firefox, Edge or the CLI.
+- **`connection refused` from your proxy on a different host**: the ports bind to `127.0.0.1` only. If the proxy lives elsewhere, change the `ports:` mapping and firewall it so only the proxy can reach it, and set `TRUSTED_PROXIES` to the proxy's address.
+- **Logs**: structured JSON on stdout (`docker compose logs warpdrop`). Room codes and secrets are never logged.

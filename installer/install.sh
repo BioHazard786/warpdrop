@@ -130,6 +130,17 @@ print_message() {
 }
 
 #---  FUNCTION  ----------------------------------------------------------------
+#          NAME:  debug
+#   DESCRIPTION:  Prints a message only when DEBUG is set (DEBUG=1 curl ... | bash)
+#-------------------------------------------------------------------------------
+debug() {
+  if [[ -n "${DEBUG:-}" ]]; then
+    print_message "== [DEBUG] ${1}" "info"
+  fi
+  return 0
+}
+
+#---  FUNCTION  ----------------------------------------------------------------
 #          NAME:  make_tempdir
 #   DESCRIPTION:  Makes a temp dir using mktemp if available
 #    PARAMETERS:  $1 = Directory template
@@ -228,7 +239,7 @@ download_file() {
   filename="${3}"
 
   if command -v curl >/dev/null 2>&1; then
-    curl -sSL "${url}" -o "${dir}/${filename}"
+    curl -fsSL "${url}" -o "${dir}/${filename}"
     rcode="${?}"
   elif command -v wget >/dev/null 2>&1; then
     wget --quiet  "${url}" -O "${dir}/${filename}"
@@ -268,53 +279,50 @@ checksum_check() {
   dir="${3}"
   filename_to_find="$(basename "${file}")"
 
-  print_message "== [DEBUG] Checksum verification starting..." "info"
-  print_message "== [DEBUG] Checksum file: ${checksum_file}" "info"
-  print_message "== [DEBUG] File to check: ${file}" "info"
-  print_message "== [DEBUG] Filename to find: ${filename_to_find}" "info"
-  print_message "== [DEBUG] Working directory: ${dir}" "info"
+  debug "Checksum verification starting..."
+  debug "Checksum file: ${checksum_file}"
+  debug "File to check: ${file}"
+  debug "Filename to find: ${filename_to_find}"
+  debug "Working directory: ${dir}"
 
   cd "${dir}" || return 30
   
-  print_message "== [DEBUG] Contents of checksum file:" "info"
-  cat "${checksum_file}" | head -5
-  
+  debug "Contents of checksum file:"
+
   if command -v sha256sum >/dev/null 2>&1; then
-    print_message "== [DEBUG] Using sha256sum tool" "info"
+    debug "Using sha256sum tool"
     ## Not all sha256sum versions seem to have --ignore-missing, so filter the checksum file
     ## to only include the file we downloaded.
     grep_result="$(grep "${filename_to_find}" "${checksum_file}" || true)"
-    print_message "== [DEBUG] Grep result: ${grep_result}" "info"
+    debug "Grep result: ${grep_result}"
     echo "${grep_result}" > filtered_checksum.txt
-    print_message "== [DEBUG] Contents of filtered_checksum.txt:" "info"
-    cat filtered_checksum.txt
+    debug "Contents of filtered_checksum.txt:"
     shasum_c="$(sha256sum -c "filtered_checksum.txt" 2>&1)"
     rcode="${?}"
-    print_message "== [DEBUG] sha256sum output: ${shasum_c}" "info"
+    debug "sha256sum output: ${shasum_c}"
   elif command -v shasum >/dev/null 2>&1; then
-    print_message "== [DEBUG] Using shasum tool" "info"
+    debug "Using shasum tool"
     ## With shasum on FreeBSD, we don't get to --ignore-missing, so filter the checksum file
     ## to only include the file we downloaded.
     grep_result="$(grep "${filename_to_find}" "${checksum_file}" || true)"
-    print_message "== [DEBUG] Grep result: ${grep_result}" "info"
+    debug "Grep result: ${grep_result}"
     echo "${grep_result}" > filtered_checksum.txt
-    print_message "== [DEBUG] Contents of filtered_checksum.txt:" "info"
-    cat filtered_checksum.txt
+    debug "Contents of filtered_checksum.txt:"
     shasum_c="$(shasum -a 256 -c "filtered_checksum.txt" 2>&1)"
     rcode="${?}"
-    print_message "== [DEBUG] shasum output: ${shasum_c}" "info"
+    debug "shasum output: ${shasum_c}"
   elif command -v sha256 >/dev/null 2>&1; then
-    print_message "== [DEBUG] Using sha256 tool" "info"
+    debug "Using sha256 tool"
     ## With sha256 on FreeBSD, we don't get to --ignore-missing, so filter the checksum file
     ## to only include the file we downloaded.
     ## Also sha256 -c option seems to fail, so fall back to an if statement
     grep_result="$(grep "${filename_to_find}" "${checksum_file}" || true)"
-    print_message "== [DEBUG] Grep result: ${grep_result}" "info"
+    debug "Grep result: ${grep_result}"
     echo "${grep_result}" > filtered_checksum.txt
     shasum_1="$(sha256 -q "${file}")"
     shasum_2="$(awk '{print $1}' filtered_checksum.txt)"
-    print_message "== [DEBUG] Computed hash: ${shasum_1}" "info"
-    print_message "== [DEBUG] Expected hash: ${shasum_2}" "info"
+    debug "Computed hash: ${shasum_1}"
+    debug "Expected hash: ${shasum_2}"
     if [[ "${shasum_1}" == "${shasum_2}" ]]; then
       rcode="0"
     else
@@ -536,10 +544,17 @@ install_file_cygwin() {
 #-------------------------------------------------------------------------------
 get_latest_version() {
   local api_url="https://api.github.com/repos/BioHazard786/Warpdrop/releases/latest"
+  local web_url="https://github.com/BioHazard786/Warpdrop/releases/latest"
   local response
   local version
+  local final_url
 
-  # 1. Fetch the response content first
+  # explicit override: WARPDROP_VERSION=0.1.0 (a leading v is accepted)
+  if [[ -n "${WARPDROP_VERSION:-}" ]]; then
+    echo "${WARPDROP_VERSION#v}"
+    return 0
+  fi
+
   if command -v curl >/dev/null 2>&1; then
     response="$(curl -fsSL "${api_url}" 2>/dev/null)"
   elif command -v wget >/dev/null 2>&1; then
@@ -548,9 +563,16 @@ get_latest_version() {
     return 20 # Missing dependencies
   fi
 
-  # 2. Parse with robust regex (handles optional spaces)
-  # Logic: Find "tag_name", allow optional spaces/colon, capture content inside quotes
+  # Find "tag_name", allow optional spaces/colon, capture content inside quotes
   version="$(echo "${response}" | grep -o '"tag_name":[[:space:]]*"[^"]*"' | cut -d'"' -f4 | sed 's/^v//')"
+
+  # The API is rate limited (60/h per IP); the releases/latest redirect is not, and ends in the tag name.
+  if [[ -z "${version}" ]] && command -v curl >/dev/null 2>&1; then
+    final_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "${web_url}" 2>/dev/null)"
+    version="${final_url##*/}"
+    version="${version#v}"
+    [[ "${version}" == "latest" ]] && version=""
+  fi
 
   if [[ -z "${version}" ]]; then
     return 1 # Failed to find version
@@ -601,8 +623,9 @@ main() {
   if [[ $? -eq 0 ]]; then
     print_message "== Latest version detected: ${warpdrop_version}" "ok"
   else
-    print_message "== Failed to fetch latest version from GitHub, falling back to v0.0.2" "warn"
-    warpdrop_version="0.0.3"
+    print_message "== Could not determine the latest version (offline, or GitHub unreachable)." "error"
+    print_message "== Set it yourself and retry: WARPDROP_VERSION=x.y.z bash install.sh" "error"
+    exit 1
   fi
   
   print_message "== Install prefix set to ${prefix}" "info"
@@ -610,9 +633,12 @@ main() {
   tmpdir="$(make_tempdir "${warpdrop_bin_name}")"
   tmpdir_rcode="${?}"
   if [[ "${tmpdir_rcode}" == "0" ]]; then
-    print_message "== Created temp dir at ${tmpdir}" "info"
+    debug "Created temp dir at ${tmpdir}"
+    # shellcheck disable=SC2064  # expand now: tmpdir is a local that is gone when the trap fires
+    trap "rm -rf '${tmpdir}'" EXIT
   elif [[ "${tmpdir_rcode}" == "1" ]]; then
-    print_message "== Failed to create temp dir at ${tmpdir}" "error"
+    print_message "== Failed to create a temp dir" "error"
+    exit 1
   else
     print_message "== 'mktemp' not found in path. Is it installed?" "error"
     exit 1

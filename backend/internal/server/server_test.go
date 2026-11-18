@@ -373,3 +373,26 @@ func TestSPAAndConfig(t *testing.T) {
 		t.Fatalf("config: %v %+v", err, cfg)
 	}
 }
+
+func TestRateLimitScale(t *testing.T) {
+	create := func(e env) (ok int) {
+		for i := 0; i < 30; i++ {
+			c := e.dial(t)
+			c.send(map[string]any{"t": "create_room", "v": 2, "client": map[string]any{}})
+			if c.recv()["t"] == "room_created" {
+				ok++
+			}
+			_ = c.c.Close() // the per-IP concurrent-connection cap (20) is a separate limit; do not trip it here
+			time.Sleep(5 * time.Millisecond)
+		}
+		return ok
+	}
+	base := create(setup(t, nil))
+	if base != 5 {
+		t.Fatalf("default burst should allow exactly 5 rooms, got %d", base)
+	}
+	scaled := create(setup(t, func(c *config.Config) { c.RateScale = 10 }))
+	if scaled != 30 {
+		t.Fatalf("RATE_LIMIT_SCALE=10 should lift the limit (burst 50), got %d of 30", scaled)
+	}
+}

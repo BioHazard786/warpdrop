@@ -1,136 +1,38 @@
-# ================================
-# FRONTEND (Next.js/TypeScript/Bun)
-# ================================
-
-# dependencies
-frontend/node_modules/
-frontend/.pnp
-frontend/.pnp.*
-frontend/.yarn/*
-!frontend/.yarn/patches
-!frontend/.yarn/plugins
-!frontend/.yarn/releases
-!frontend/.yarn/versions
-frontend/bun.lockb
-
-# testing
-frontend/coverage/
-frontend/.nyc_output/
-frontend/test.ts
-
-# next.js
-frontend/.next/
-frontend/out/
-frontend/dist/
-
-# production
-frontend/build/
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-bun-debug.log*
-.pnpm-debug.log*
-
-# env files
-.env
-.env*.local
-.env.development
-.env.production
-.env.test
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-frontend/next-env.d.ts
-
-# IDE
-# .vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# ================================
-# BACKEND (Go)
-# ================================
-
-# Binaries for programs and plugins
-backend/*.exe
-backend/*.exe~
-backend/*.dll
-backend/*.so
-backend/*.dylib
-backend/main
-backend/server
-backend/cmd/server/server
-backend/cmd/server/main
-
-# Test binary, built with `go test -c`
-backend/*.test
-backend/test.go
-
-# Output of the go coverage tool
-backend/*.out
-backend/coverage.txt
-backend/coverage.html
-
-# Go workspace file
-backend/go.work
-backend/go.work.sum
-
-# Dependency directories
-backend/vendor/
-
-# Go build cache
-backend/.cache/
-
-# Air (live reload) temporary files
-backend/tmp/
-backend/.air.toml
-
-# ================================
-# CLI (Go)
-# ================================
-
-# Binaries for programs and plugins
-cli/*.exe
-cli/dist/*
-
-# Test binary, built with `go test -c`
-cli/*.test
-cli/cmd/test/test.go
-
-# ================================
-# GENERAL
-# ================================
-
-# OS files
-.DS_Store
-Thumbs.db
-Desktop.ini
-
-# Log files
-*.log
-
-# Temporary files
-*.tmp
-*.temp
-.cache/
-
-# goreleaser
-build_release_cli.sh
-
-# ================================
-# v2 WEB (Vite) + embedded dist
-# ================================
+# ---- web (Vite) and the embedded build output
 web/node_modules/
 backend/web/dist/*
 !backend/web/dist/.gitkeep
+*.tsbuildinfo
+
+# ---- e2e (Playwright)
+e2e/node_modules/
+e2e/.bin/
+e2e/test-results/
+e2e/playwright-report/
+
+# ---- go
+backend/server
+backend/cmd/server/server
+*.test
+*.out
+go.work
+go.work.sum
+cli/dist/
+cli/bench/tlsproxy/tlsproxy
+
+# ---- env and secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# ---- misc
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+.cache/
+.idea/
+*.swp
+*~
+build_release_cli.sh

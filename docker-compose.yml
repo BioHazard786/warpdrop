@@ -1,52 +1,62 @@
-services:
-  installer:
-    image: ghcr.io/biohazard786/warpdrop-cli-installer:latest
-    ports:
-      - "127.0.0.1:8000:8000"
-    restart: unless-stopped
+# WarpDrop: one container serves the web app, signaling and the encrypted relay.
+# Put your own Caddy/Nginx in front (see deploy/); nothing here binds a public port.
+#
+#   docker compose up -d                  # app (+ installer)
+#   docker compose --profile turn up -d   # also run coturn (optional, see DEPLOY.md)
 
-  backend:
-    image: ghcr.io/biohazard786/warpdrop-backend:latest
-    environment:
-      - PORT=8080
+services:
+  warpdrop:
+    image: ghcr.io/biohazard786/warpdrop:${WARPDROP_VERSION:-latest}
+    build: .
+    restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
-    restart: unless-stopped
-
-  frontend:
-    image: ghcr.io/biohazard786/warpdrop-frontend:latest
     environment:
-      - NODE_ENV=production
-      - NEXT_PUBLIC_STUN_SERVER=${NEXT_PUBLIC_STUN_SERVER:-stun:stun.l.google.com:19302}
-      - NEXT_PUBLIC_DOMAIN=${DOMAIN}
-      # - NEXT_PUBLIC_TURN_SERVER=${NEXT_PUBLIC_TURN_SERVER:-turn.${DOMAIN}}
-      # - NEXT_PUBLIC_TURN_USERNAME=${NEXT_PUBLIC_TURN_USERNAME:-warpdrop}
-      # - NEXT_PUBLIC_TURN_PASSWORD=${NEXT_PUBLIC_TURN_PASSWORD:-warpdrop-secret}
-    ports:
-      - "127.0.0.1:3000:3000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-    restart: unless-stopped
+      PORT: "8080"
+      # encrypted WebSocket relay used when a direct connection fails; "off" disables it
+      RELAY: ${RELAY:-on}
+      RELAY_MAX_MBPS: ${RELAY_MAX_MBPS:-0}
+      RELAY_MAX_CONNS: ${RELAY_MAX_CONNS:-200}
+      # extra browser origins allowed to open /ws (same host is always allowed)
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      # peers whose X-Forwarded-For is trusted: loopback plus Docker's bridge ranges, where a host proxy appears from
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1,172.16.0.0/12}
+      STUN_URLS: ${STUN_URLS:-stun:stun.l.google.com:19302}
+      # TURN is used only when BOTH of these are set
+      TURN_URLS: ${TURN_URLS:-}
+      TURN_SECRET: ${TURN_SECRET:-}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
 
-  # coturn:
-  #   image: coturn/coturn:latest
-  #   ports:
-  #     - "3478:3478/tcp"
-  #     - "3478:3478/udp"
-  #     - "5349:5349/tcp"
-  #     - "5349:5349/udp"
-  #     - "60000-60128:60000-60128/udp"
-  #   volumes:
-  #     - ./deploy/turnserver.conf:/etc/coturn/turnserver.conf
-  #   restart: unless-stopped
-  #   networks:
-  #     - web
-  #   environment:
-  #     - DETECT_EXTERNAL_IP=yes
-  #     - DETECT_RELAY_IP=yes
-  #   # NOTE: TURN over TLS (port 5349) needs certificates at /etc/coturn/certs.
-  #   # Easiest path: point your host Caddy/Nginx at turn.${DOMAIN} so it provisions
-  #   # a cert, then mount the cert files into this container via an extra volume.
+  installer:
+    image: ghcr.io/biohazard786/warpdrop-cli-installer:${WARPDROP_VERSION:-latest}
+    build: ./installer
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  # Optional TURN relay. Needs TURN_SECRET (the same value the app uses), TURN_REALM (your domain) and
+  # TURN_EXTERNAL_IP (the server's public IP). Host networking is required for the UDP relay port range.
+  coturn:
+    profiles: ["turn"]
+    image: coturn/coturn:4.7.0
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_SECRET: ${TURN_SECRET:-}
+      TURN_REALM: ${TURN_REALM:-}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
+    volumes:
+      - ./deploy/turnserver.conf:/etc/turnserver.static.conf:ro
+    # The secret goes into a generated config rather than argv, so it never shows up in `ps`.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        [ -n "$$TURN_SECRET" ] || { echo "TURN_SECRET must be set to run coturn" >&2; exit 1; }
+        [ -n "$$TURN_REALM" ] || { echo "TURN_REALM must be set to run coturn" >&2; exit 1; }
+        [ -n "$$TURN_EXTERNAL_IP" ] || { echo "TURN_EXTERNAL_IP must be set to run coturn" >&2; exit 1; }
+        cp /etc/turnserver.static.conf /tmp/turnserver.conf
+        printf 'static-auth-secret=%s\nrealm=%s\nexternal-ip=%s\n' "$$TURN_SECRET" "$$TURN_REALM" "$$TURN_EXTERNAL_IP" >> /tmp/turnserver.conf
+        exec turnserver -c /tmp/turnserver.conf --log-file=stdout

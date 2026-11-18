@@ -18,6 +18,9 @@ type Config struct {
 	STUNURLs       []string
 	TURNURLs       []string
 	TURNSecret     string
+	// RateScale multiplies the per-IP limits on room creation, joining and relay requests (default 1).
+	// Raise it when many users share one address (office or school NAT); lower it to be stricter.
+	RateScale float64
 }
 
 func Load() Config {
@@ -31,6 +34,7 @@ func Load() Config {
 		STUNURLs:       listOr(os.Getenv("STUN_URLS"), "stun:stun.l.google.com:19302"),
 		TURNURLs:       list(os.Getenv("TURN_URLS")),
 		TURNSecret:     os.Getenv("TURN_SECRET"),
+		RateScale:      scale(os.Getenv("RATE_LIMIT_SCALE")),
 	}
 }
 
@@ -76,4 +80,12 @@ func prefixes(s string) []netip.Prefix {
 		}
 	}
 	return out
+}
+
+// scale parses RATE_LIMIT_SCALE; anything missing, non-numeric or not positive means 1.
+func scale(s string) float64 {
+	if f, err := strconv.ParseFloat(s, 64); err == nil && f > 0 && f <= 1000 {
+		return f
+	}
+	return 1
 }

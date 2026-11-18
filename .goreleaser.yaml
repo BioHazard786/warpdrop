@@ -8,9 +8,13 @@
 
 version: 2
 
-# Use the git tag as the snapshot version (drops the -SNAPSHOT suffix)
+# install.sh downloads warpdrop_v<version>_<OS>-<Arch>.tar.gz and warpdrop_<version>_checksums.txt, so the project name
+# must be fixed lowercase (it is otherwise taken from the repository name's casing).
+project_name: warpdrop
+
+# Snapshots are named like real releases (Version has no leading v; the archive template adds it)
 snapshot:
-  version_template: "{{ .Tag }}"
+  version_template: '{{ trimprefix .Tag "v" }}'
 
 # Where to put build outputs
 dist: ./cli/dist
@@ -117,6 +121,7 @@ scoops:
       owner: BioHazard786
       name: scoop-bucket
       branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}" # other repo: the default GITHUB_TOKEN cannot push there
     commit_msg_template: "scoop: update warpdrop to {{ .Tag }}"
     # Uncomment to enable automatic PRs to another fork (Pro feature requirements)
     # pull_request:
@@ -142,6 +147,7 @@ homebrew_casks:
       owner: BioHazard786
       name: homebrew-tap
       branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     commit_msg_template: "homebrew: update warpdrop to {{ .Tag }}"
     # Binary name (defaults to project name). Provided for clarity.
     binaries:

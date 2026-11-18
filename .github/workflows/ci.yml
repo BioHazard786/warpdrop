@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, v2]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: go vet ./...
+        working-directory: backend
+      - run: go test -race -count=1 ./...
+        working-directory: backend
+
+  cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: |
+            cli/go.sum
+            backend/go.sum
+      - run: go vet ./...
+        working-directory: cli
+      # the integration tests build and start ../backend, so this also covers the real server
+      - run: go test -race -count=1 ./...
+        working-directory: cli
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-go@v7 # the relay integration test builds the Go server
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: bun install --frozen-lockfile
+        working-directory: web
+      - run: bun run lint
+        working-directory: web
+      - run: bun run fmt:check
+        working-directory: web
+      - run: bun x tsc -b
+        working-directory: web
+      - run: bun x vitest run
+        working-directory: web
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: |
+            backend/go.sum
+            cli/go.sum
+      - run: bun install --frozen-lockfile
+        working-directory: e2e
+      - run: bun x playwright install --with-deps chromium firefox
+        working-directory: e2e
+      - run: bun x playwright test
+        working-directory: e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
+          retention-days: 7
+
+  shell-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck install.sh
+        run: shellcheck -S warning installer/install.sh
+      - name: compose files are valid
+        run: |
+          docker compose config -q
+          docker compose --profile turn config -q
+      - name: image builds
+        run: docker build -t warpdrop:ci .
