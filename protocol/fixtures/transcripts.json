@@ -248,6 +248,30 @@
               "name": "a\u001b[31mb\\c/d.txt",
               "size": 0,
               "type": ""
+            },
+            {
+              "id": 3,
+              "name": "x\u001b[31mred.txt",
+              "size": 0,
+              "type": ""
+            },
+            {
+              "id": 4,
+              "name": "..",
+              "size": 0,
+              "type": ""
+            },
+            {
+              "id": 5,
+              "name": "a<b>:c.txt. ",
+              "size": 0,
+              "type": ""
+            },
+            {
+              "id": 6,
+              "name": "evil‮gpj.exe",
+              "size": 0,
+              "type": ""
             }
           ]
         }
@@ -265,7 +289,23 @@
         },
         {
           "id": 2,
-          "name": "a[31mb_c_d.txt"
+          "name": "d.txt"
+        },
+        {
+          "id": 3,
+          "name": "x[31mred.txt"
+        },
+        {
+          "id": 4,
+          "name": "file"
+        },
+        {
+          "id": 5,
+          "name": "a_b__c.txt"
+        },
+        {
+          "id": 6,
+          "name": "evilgpj.exe"
         }
       ],
       "error": null
