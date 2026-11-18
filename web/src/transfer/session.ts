@@ -37,6 +37,9 @@ import {
 } from "./protocol"
 import { type Transport, type Wire, chunkSizeFor } from "./transport"
 
+/** No frame for this long while a transfer is in flight means the link is dead (NAT timeout, sleeping laptop). */
+export const STALL_MS = 30_000
+
 export type Result =
   | { status: "done" }
   | { status: "failed"; reason: CancelReason; byPeer: boolean }
@@ -268,8 +271,16 @@ export class SenderSession {
           for (let i = 0; i < value.length; i += size) {
             const part = value.subarray(i, i + size)
             // flow control: receiver-confirmed window first, then the socket's own buffer
-            while (sent - this.acked >= MAX_UNACKED && !signal.aborted)
-              await new Promise<void>((r) => this.ackWaiters.push(r))
+            while (sent - this.acked >= MAX_UNACKED && !signal.aborted) {
+              const before = this.acked
+              let timer: ReturnType<typeof setTimeout> | undefined
+              await Promise.race([
+                new Promise<void>((r) => this.ackWaiters.push(r)),
+                new Promise<void>((r) => (timer = setTimeout(r, STALL_MS))),
+              ])
+              clearTimeout(timer)
+              if (this.acked === before && !signal.aborted) return void this.t.close() // receiver went silent: end as "closed" so it can resume
+            }
             if (this.t.buffered > HIGH_WATER) await this.t.drain()
             if (signal.aborted) return
             this.t.send(part)
@@ -377,7 +388,15 @@ export class ReceiverSession {
       this.resolve(failHandshake(this.t, hs.result))
       return this.result
     }
+    let last = Date.now()
+    const watchdog = setInterval(() => {
+      const busy =
+        this.rs.s === "streaming" || this.rs.s === "await_start" || this.rs.s === "verifying"
+      if (busy && Date.now() - last > STALL_MS) this.t.close() // not while the user is still deciding
+    }, 5000)
+    void this.result.finally(() => clearInterval(watchdog))
     inbox.setHandler((w) => {
+      last = Date.now()
       if (w === null) return this.enqueue({ e: "closed" })
       if (typeof w !== "string") return this.enqueue({ e: "chunk", n: w.length }, w)
       const f = parseFrame(w)
@@ -388,7 +407,9 @@ export class ReceiverSession {
 
   /** Frames are processed strictly in order, each fully awaited, so a slow sink delays acks and therefore the sender. */
   private enqueue(ev: REvent, chunk?: Uint8Array) {
-    this.chain = this.chain.then(() => this.step(ev, chunk)).catch(() => this.step({ e: "bad" }))
+    this.chain = this.chain
+      .then(() => this.step(ev, chunk))
+      .catch(() => this.fail("protocol_error"))
   }
 
   private async step(ev: REvent, chunk?: Uint8Array) {

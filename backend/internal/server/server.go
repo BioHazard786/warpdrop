@@ -24,9 +24,9 @@ import (
 
 const maxConnsPerIP = 20
 
-const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+const csp = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; " +
-	"frame-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+	"frame-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
 
 type Server struct {
 	cfg   config.Config

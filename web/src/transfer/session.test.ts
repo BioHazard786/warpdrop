@@ -300,3 +300,15 @@ describe("handshake failure never leaves the peer waiting", () => {
     expect(b.status === "failed" || b.status === "closed").toBe(true)
   })
 })
+
+describe("driver faults fail loudly", () => {
+  it("a sink that throws on open ends both sides instead of hanging", async () => {
+    const sink = new MemSink()
+    sink.open = async () => {
+      throw new Error("disk full")
+    }
+    const x = rig([fileFrom(0, "x", pattern(10))], { sink })
+    expect(await x.rRes).toMatchObject({ status: "failed", reason: "protocol_error" })
+    expect(await x.sRes).toMatchObject({ status: "failed", byPeer: true })
+  })
+})

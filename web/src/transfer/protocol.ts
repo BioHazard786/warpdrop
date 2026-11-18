@@ -9,6 +9,8 @@ export const HIGH_WATER = 16 * MiB
 export const LOW_WATER = 4 * MiB
 export const MAX_FILES = 10_000
 export const MAX_NAME_BYTES = 255
+/** The manifest is one text frame; 60 kB stays under the smallest SCTP max message (~64 KiB) of any peer. */
+export const MAX_MANIFEST_BYTES = 60_000
 export const HANDSHAKE_TIMEOUT_MS = 20_000
 
 export const CANCEL_REASONS = [

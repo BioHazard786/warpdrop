@@ -1,4 +1,5 @@
 import { deviceName, registerTransport } from "./device"
+import { MAX_FILES, MAX_MANIFEST_BYTES } from "./protocol"
 import { RtcPeer, isSignalPayload } from "./rtc"
 import { RelayTransport } from "./relay-transport"
 import { type FileSource, SenderSession } from "./session"
@@ -13,7 +14,9 @@ export interface PeerView {
   status: "connecting" | "authenticating" | "sending" | "done" | "failed"
   /** Why it failed, human readable. */
   reason?: string
-  fileBytes: number[]
+  /** Bytes delivered so far, across all files. */
+  sent: number
+  total: number
   filesDone: number
 }
 
@@ -56,6 +59,8 @@ const REASONS: Record<string, string> = {
 /** One sender room: owns the signaling socket and one PeerLink per receiver. */
 export class SenderRoom {
   private sources: FileSource[]
+  private prefix: number[] // prefix[i] = bytes in files before i; files are served in order
+  readonly total: number
   private emit: (e: SenderEvent) => void
   private sig: Signaling | null = null
   private links = new Map<string, PeerLink>()
@@ -68,10 +73,24 @@ export class SenderRoom {
 
   constructor(files: File[], emit: (e: SenderEvent) => void) {
     this.sources = files.map((f, i) => fileSource(f, i))
+    this.prefix = []
+    let acc = 0
+    for (const f of this.sources) {
+      this.prefix.push(acc)
+      acc += f.size
+    }
+    this.total = acc
     this.emit = emit
   }
 
   async start() {
+    const manifest = JSON.stringify(
+      this.sources.map(({ id, name, size, type }) => ({ id, name, size, type })),
+    )
+    if (this.sources.length === 0) return this.fatal("Choose at least one file.")
+    if (this.sources.length > MAX_FILES || manifest.length > MAX_MANIFEST_BYTES) {
+      return this.fatal("Too many files for one transfer. Put them in a zip first.")
+    }
     this.emit({ t: "status", status: "starting" })
     this.config = await fetchConfig().catch(() => FALLBACK_CONFIG)
     this.sig = new Signaling({
@@ -144,6 +163,9 @@ export class SenderRoom {
   files() {
     return this.sources
   }
+  offsetOf(idx: number) {
+    return this.prefix[idx] ?? 0
+  }
   get id() {
     return this.roomId
   }
@@ -200,7 +222,8 @@ class PeerLink {
       device,
       transport: null,
       status: "connecting",
-      fileBytes: room.files().map(() => 0),
+      sent: 0,
+      total: room.total,
       filesDone: 0,
     }
     room.emitPeer(this.view)
@@ -252,11 +275,8 @@ class PeerLink {
       secret: this.room.sharedSecret,
       device: deviceName(),
       files: this.room.files(),
-      onProgress: (idx, bytes) => {
-        const fileBytes = this.view.fileBytes.slice()
-        fileBytes[idx] = bytes
-        this.update({ fileBytes, status: "sending" })
-      },
+      onProgress: (idx, bytes) =>
+        this.update({ sent: this.room.offsetOf(idx) + bytes, status: "sending" }),
       onFileDone: () => this.update({ filesDone: this.view.filesDone + 1 }),
     })
     this.session = session

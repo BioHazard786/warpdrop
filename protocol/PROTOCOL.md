@@ -90,6 +90,7 @@ receiver → ack {id, bytes}                                after every 4 MiB wr
 
 - every control message matches its schema; unknown `t` is a protocol error
 - `size` is a finite integer ≥ 0; at most 10 000 files; names ≤ 255 bytes
+- the serialized `manifest` frame is at most 60 000 bytes (it is one frame; the smallest SCTP max message is ~64 KiB), so in practice about 1 000 files; senders refuse larger sets and ask the user to zip them
 - `sanitizeName`: take the last path segment after `/` or `\`, strip control characters (including ANSI escapes) and `..`,
   replace characters illegal on Windows (`<>:"|?*`) with `_`, prefix `_` to Windows reserved names (`CON`, `NUL`, `COM1`…), never return an empty name
 - a binary frame outside `file_start`/`file_end`, or bytes beyond `size`, is `protocol_error`

@@ -1,13 +1,31 @@
-import { createRootRoute, Outlet } from "@tanstack/react-router"
+import { Outlet, createRootRoute } from "@tanstack/react-router"
+import { AsciiLogo } from "@/components/ascii-logo"
+import { Header } from "@/components/header"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
 export const Route = createRootRoute({
   component: () => (
     <TooltipProvider>
-      <Outlet />
+      <div className="flex min-h-svh flex-col">
+        <Header />
+        <main className="mx-auto w-full max-w-2xl flex-1 space-y-8 px-4 pt-4 pb-16">
+          <AsciiLogo />
+          <p className="font-mono text-xs text-muted-foreground">
+            Device to device. No upload, no account. End-to-end encrypted.
+          </p>
+          <Outlet />
+        </main>
+      </div>
       <Toaster />
     </TooltipProvider>
   ),
-  notFoundComponent: () => <p className="p-6 font-mono text-sm">404 // nothing here</p>,
+  notFoundComponent: () => (
+    <p className="font-mono text-sm text-muted-foreground">
+      404 // nothing here.{" "}
+      <a className="underline" href="/">
+        Send a file
+      </a>
+    </p>
+  ),
 })
