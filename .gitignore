@@ -127,3 +127,10 @@ Desktop.ini
 
 # goreleaser
 build_release_cli.sh
+
+# ================================
+# v2 WEB (Vite) + embedded dist
+# ================================
+web/node_modules/
+backend/web/dist/*
+!backend/web/dist/.gitkeep

@@ -1,0 +1,5 @@
+**/node_modules
+backend/web/dist
+.git
+frontend
+e2e/node_modules
