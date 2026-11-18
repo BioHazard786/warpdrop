@@ -13,15 +13,17 @@ import (
 )
 
 const (
-	Version          = 2
-	ChunkSize        = 256 << 10
-	AckEvery         = 4 << 20
-	MaxUnacked       = 32 << 20
-	HighWater        = 16 << 20
-	LowWater         = 4 << 20
-	MaxFiles         = 10_000
-	MaxNameBytes     = 255
-	MaxManifestBytes = 60_000
+	Version      = 2
+	ChunkSize    = 256 << 10
+	AckEvery     = 4 << 20
+	MaxUnacked   = 32 << 20
+	HighWater    = 16 << 20
+	LowWater     = 4 << 20
+	MaxFiles     = 10_000
+	MaxNameBytes = 255
+	// MaxManifestBytes keeps the manifest (one text frame) under the 256 KiB message size both implementations
+	// advertise, with slack. That is roughly 2,300 files; more must be zipped.
+	MaxManifestBytes = 200_000
 	HandshakeTimeout = 20 * time.Second
 	StallTimeout     = 30 * time.Second
 )

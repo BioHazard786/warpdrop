@@ -72,13 +72,31 @@ export class RtcTransport implements Transport {
   private shutdown() {
     if (this.closed) return
     this.closed = true
+    this.onclose?.() // local readers see the close immediately
+    // Closing the data channel first lets queued data (a final cancel, say) reach the peer; only then drop the connection.
+    const { pc, dc } = this
+    const dropPc = () => {
+      try {
+        pc.close()
+      } catch {
+        /* already closed */
+      }
+    }
     try {
-      this.dc.close()
-      this.pc.close()
+      dc.close()
     } catch {
       /* already closed */
     }
-    this.onclose?.()
+    if (dc.readyState === "closed") return dropPc()
+    const timer = setTimeout(dropPc, 1000)
+    dc.addEventListener(
+      "close",
+      () => {
+        clearTimeout(timer)
+        dropPc()
+      },
+      { once: true },
+    )
   }
 }
 

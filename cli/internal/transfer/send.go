@@ -64,6 +64,7 @@ type room struct {
 	token  string
 	links  map[string]*link
 
+	sessions  sync.WaitGroup // live RunSender goroutines: on shutdown they send "cancelled" before we close anything
 	authFails atomic.Int32
 	fatal     chan error
 }
@@ -241,6 +242,13 @@ func (r *room) shutdown() {
 	}
 	r.mu.Unlock()
 	r.send(map[string]any{"t": "close_room"})
+	// ctx is cancelled by now, so each running session is sending its cancel frame; give them a moment before closing
+	done := make(chan struct{})
+	go func() { r.sessions.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+	}
 	for _, l := range links {
 		l.dispose(false)
 	}
@@ -364,7 +372,9 @@ func (l *link) attach(t protocol.Transport, from *protocol.RTCPeer) {
 	}
 	l.update(func(v *PeerView) { v.Transport, v.Status = kind, "authenticating" })
 
+	l.r.sessions.Add(1)
 	go func() {
+		defer l.r.sessions.Done()
 		res := protocol.RunSender(l.r.ctx, t, protocol.SenderOptions{
 			RoomID: l.r.roomID, Secret: l.r.secret, Device: l.r.device, Files: l.r.files,
 			OnProgress: func(idx int, b int64) {

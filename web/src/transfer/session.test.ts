@@ -324,3 +324,39 @@ describe("graceful shutdown", () => {
     expect(x.st.closed).toBe(true)
   })
 })
+
+describe("large manifests", () => {
+  it("sends 2,000 files (about 170 kB of manifest) and refuses a list that cannot fit one message", async () => {
+    const many = Array.from({ length: 2000 }, (_, i) => fileFrom(i, `f${i}.bin`, pattern(1, i)))
+    const x = rig(many)
+    expect(await x.sRes).toEqual({ status: "done" })
+    expect(await x.rRes).toEqual({ status: "done" })
+    expect(x.sink.names.length).toBe(2000)
+
+    const tooMany = Array.from({ length: 6000 }, (_, i) => fileFrom(i, `f${i}.bin`, pattern(1, i)))
+    const y = rig(tooMany)
+    expect(await y.sRes).toMatchObject({ status: "failed", reason: "protocol_error" })
+    expect((await y.rRes).status).toBe("failed")
+  }, 60_000)
+})
+
+describe("giving up", () => {
+  it("discard() aborts the partial download that a resume would have kept", async () => {
+    const s = new MemSink()
+    s.delay = 1
+    const pair = memoryPair()
+    pair[0].tamper = (f) => {
+      if (pair[0].sentBytes >= MiB) {
+        pair[0].close()
+        return null
+      }
+      return f
+    }
+    const x = rig([fileFrom(0, "big", pattern(8 * MiB))], { sink: s, pair })
+    expect(await x.rRes).toEqual({ status: "closed" })
+    expect(s.aborted).toEqual([]) // kept for a resume
+    x.state.discard()
+    expect(s.aborted).toEqual([0]) // abandoned: the browser's download now fails instead of hanging
+    expect(x.state.cur).toBeNull()
+  })
+})

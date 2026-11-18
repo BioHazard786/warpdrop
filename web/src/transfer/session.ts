@@ -196,12 +196,18 @@ export class SenderSession {
       this.finish(failHandshake(this.t, hs.result))
       return this.result
     }
-    this.t.send(
-      encodeFrame({
-        t: "manifest",
-        files: this.o.files.map(({ id, name, size, type }) => ({ id, name, size, type })),
-      }),
-    )
+    const manifest = encodeFrame({
+      t: "manifest",
+      files: this.o.files.map(({ id, name, size, type }) => ({ id, name, size, type })),
+    })
+    if (manifest.length > this.t.maxMessage) {
+      // the peer's SCTP/relay limit: it could never receive this frame, so say so instead of wedging the link
+      this.finish(
+        failHandshake(this.t, { status: "failed", reason: "protocol_error", byPeer: false }),
+      )
+      return this.result
+    }
+    this.t.send(manifest)
     inbox.setHandler((w) => {
       if (w === null) return this.dispatch({ e: "closed" })
       if (typeof w !== "string") return this.dispatch({ e: "bad" })
@@ -341,6 +347,12 @@ export class ReceiveState {
     hasher: Awaited<ReturnType<typeof createXXHash64>>
   } | null = null
   sinceAck = 0
+
+  /** Give up for good: abort the partial download (resuming keeps it; abandoning must not). */
+  discard() {
+    void this.cur?.writer.abort().catch(() => {})
+    this.cur = null
+  }
 }
 
 export interface ReceiverOptions {

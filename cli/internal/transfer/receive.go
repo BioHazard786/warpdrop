@@ -53,7 +53,14 @@ type receiveClient struct {
 }
 
 // RunReceive joins a room and receives its files into sink. It returns nil only when every file arrived and verified.
-func RunReceive(ctx context.Context, cfg config.Config, srv config.Server, roomID, secret, device string, sink protocol.Sink, h ReceiveHooks) error {
+func RunReceive(ctx context.Context, cfg config.Config, srv config.Server, roomID, secret, device string, sink protocol.Sink, h ReceiveHooks) (err error) {
+	state := &protocol.ReceiveState{}
+	// Giving up for any reason must not leave a half-written file behind (resuming keeps it, giving up does not).
+	defer func() {
+		if err != nil {
+			state.Discard()
+		}
+	}()
 	c := &receiveClient{cfg: cfg, srv: srv, roomID: roomID, secret: secret, device: device, h: h,
 		joined: make(chan struct{}, 1), ticket: make(chan string, 1), errMsg: make(chan string, 4)}
 	c.status("connecting", "")
@@ -70,7 +77,6 @@ func RunReceive(ctx context.Context, cfg config.Config, srv config.Server, roomI
 	if err := c.join(ctx); err != nil {
 		return err
 	}
-	state := &protocol.ReceiveState{}
 	for attempt := 0; ; attempt++ {
 		resuming := attempt > 0
 		if resuming && c.dead.Load() {

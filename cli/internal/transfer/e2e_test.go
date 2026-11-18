@@ -298,3 +298,57 @@ func TestSenderLearnsTheTransferCompleted(t *testing.T) {
 		s.cancel()
 	}
 }
+
+func tempEntries(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, _ := os.ReadDir(dir)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// Regression: interrupting the sender used to leave the receiver with a stray .part file and no useful message.
+// Both transports: the cancel frame must survive the sender hanging up right after sending it.
+func TestSenderInterruptedMidTransferTellsReceiverAndLeavesNoPartFile(t *testing.T) {
+	for _, relay := range []bool{true, false} {
+		name := map[bool]string{true: "relay", false: "webrtc"}[relay]
+		t.Run(name, func(t *testing.T) {
+			cfg := config.Config{Server: serverURL, ForceRelay: relay}
+			s := startSender(t, cfg, []protocol.Source{source(0, "big.bin", pattern(64<<20, 3))})
+			dir := t.TempDir()
+			var once sync.Once
+			err := receive(t, cfg, s, dir, ReceiveHooks{OnProgress: func(_ int, b int64) {
+				if b > 1<<20 {
+					once.Do(s.cancel) // the sender user presses Ctrl-C
+				}
+			}})
+			if err == nil || !strings.Contains(err.Error(), "cancelled") {
+				t.Fatalf("receiver should report the sender cancelled, got %v", err)
+			}
+			if left := tempEntries(t, dir); len(left) != 0 {
+				t.Fatalf("leftover files after the sender cancelled: %v", left)
+			}
+		})
+	}
+}
+
+// Regression: when the sender vanishes without a word, giving up must also discard the partial file.
+func TestSenderVanishingLeavesNoPartFile(t *testing.T) {
+	cfg := config.Config{Server: serverURL, ForceRelay: true}
+	s := startSender(t, cfg, []protocol.Source{source(0, "big.bin", pattern(64<<20, 4))})
+	dir := t.TempDir()
+	var once sync.Once
+	err := receive(t, cfg, s, dir, ReceiveHooks{OnProgress: func(_ int, b int64) {
+		if b > 1<<20 {
+			once.Do(func() { killLinks(); s.cancel() }) // transport dies and the room is gone: nothing to resume into
+		}
+	}})
+	if err == nil {
+		t.Fatal("must fail when the sender is gone for good")
+	}
+	if left := tempEntries(t, dir); len(left) != 0 {
+		t.Fatalf("leftover files after giving up: %v", left)
+	}
+}

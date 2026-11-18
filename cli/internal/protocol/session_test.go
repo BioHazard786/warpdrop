@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -358,5 +359,32 @@ func TestBinaryFrameDuringHandshakeDoesNotHangPeer(t *testing.T) {
 	a, b := wait(t, x.sRes), wait(t, x.rRes)
 	if a.Status != StatusFailed && b.Status != StatusFailed {
 		t.Fatalf("got %v / %v", a, b)
+	}
+}
+
+func TestLargeManifest(t *testing.T) {
+	many := make([]Source, 2000)
+	for i := range many {
+		many[i] = src(i, fmt.Sprintf("f%d.bin", i), pattern(1, i))
+	}
+	x := newRig(t, many, rigOpts{})
+	expect(t, wait(t, x.sRes), StatusDone, "", false)
+	expect(t, wait(t, x.rRes), StatusDone, "", false)
+	if len(x.sink.names) != 2000 {
+		t.Fatalf("received %d files", len(x.sink.names))
+	}
+
+	tooMany := make([]Source, 6000)
+	for i := range tooMany {
+		tooMany[i] = src(i, fmt.Sprintf("f%d.bin", i), pattern(1, i))
+	}
+	y := newRig(t, tooMany, rigOpts{})
+	r := wait(t, y.sRes)
+	expect(t, r, StatusFailed, ReasonProtocolError, false)
+	if r.Err == nil {
+		t.Fatal("the sender must say why")
+	}
+	if r := wait(t, y.rRes); r.Status != StatusFailed {
+		t.Fatalf("receiver: %v", r)
 	}
 }

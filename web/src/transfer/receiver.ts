@@ -112,6 +112,7 @@ export class ReceiverClient {
     if (this.ended) return
     this.status(status, { reason, code })
     this.ended = true
+    if (status === "failed") this.state.discard() // never leave the browser's download hanging
     this.rtc?.close()
     this.transport?.close()
     this.sig?.close()

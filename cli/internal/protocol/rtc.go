@@ -47,10 +47,10 @@ func newRTCTransport(pc *webrtc.PeerConnection, dc *webrtc.DataChannel) *RTCTran
 		case <-t.done:
 		}
 	})
-	dc.OnClose(func() { t.Close() })
+	dc.OnClose(func() { go t.Close() })
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
-			t.Close()
+			go t.Close()
 		}
 	})
 	return t
@@ -131,10 +131,19 @@ func (t *RTCTransport) Recv(ctx context.Context) (Wire, error) {
 	}
 }
 
+// closeGrace bounds how long Close waits for queued data to leave before tearing the connection down.
+const closeGrace = time.Second
+
+// Close ends the link without losing what was just sent (a final cancel or file_done). Closing only the data channel
+// first makes SCTP deliver queued data before it resets the stream; we wait for that to finish, then drop the connection.
 func (t *RTCTransport) Close() error {
 	t.once.Do(func() {
-		close(t.done)
+		close(t.done) // local readers see the close immediately
 		_ = t.dc.Close()
+		deadline := time.Now().Add(closeGrace)
+		for t.dc.ReadyState() != webrtc.DataChannelStateClosed && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
 		_ = t.pc.Close()
 	})
 	return nil

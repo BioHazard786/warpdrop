@@ -127,7 +127,7 @@ func runReceive(ctx context.Context, input string) error {
 	})
 	m.Clear()
 	switch {
-	case errors.Is(err, context.Canceled):
+	case ctx.Err() != nil: // Ctrl-C: the transfer was cancelled cleanly (partial files removed, sender told)
 		return errInterrupted
 	case err != nil:
 		return err

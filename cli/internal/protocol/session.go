@@ -178,7 +178,15 @@ func RunSender(ctx context.Context, t Transport, o SenderOptions) Result {
 	for i, f := range o.Files {
 		entries[i] = f.Entry
 	}
-	_ = t.SendText(Encode(NewManifest(entries)))
+	manifest := Encode(NewManifest(entries))
+	if len(manifest) > t.MaxMessage() { // the peer's SCTP/relay limit: it could never receive this frame
+		_ = t.SendText(Encode(NewCancel(ReasonProtocolError)))
+		_ = t.Close()
+		r := failed(ReasonProtocolError, false)
+		r.Err = fmt.Errorf("file list (%d bytes) exceeds this connection's message limit (%d): send fewer files or zip them", len(manifest), t.MaxMessage())
+		return r
+	}
+	_ = t.SendText(manifest)
 
 	s := &sender{t: t, o: o, ackCh: make(chan struct{}, 1), events: make(chan SEvent, 16)}
 	rctx, cancel := context.WithCancel(ctx)
@@ -378,6 +386,14 @@ type ReceiveState struct {
 	NextIdx  int
 	cur      *curFile
 	sinceAck int64
+}
+
+// Discard throws away a partial file that was kept for a resume. Call it when giving up for good.
+func (s *ReceiveState) Discard() {
+	if s.cur != nil {
+		_ = s.cur.w.Abort()
+		s.cur = nil
+	}
 }
 
 type ReceiverOptions struct {
