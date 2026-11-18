@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -75,7 +76,8 @@ type sent struct {
 	peers          map[string]PeerView
 }
 
-// NOTE: the server rate-limits room creation (burst 5 per IP), so keep the number of startSender calls in this file at 5 or fewer.
+// startSender creates a room. The server rate-limits room creation (burst 5, then one per 6 s per IP), so when it
+// answers "too many requests" we wait for a token instead of failing: tests must not depend on how many rooms ran before.
 func startSender(t *testing.T, cfg config.Config, files []protocol.Source) *sent {
 	t.Helper()
 	if serverURL == "" {
@@ -85,22 +87,33 @@ func startSender(t *testing.T, cfg config.Config, files []protocol.Source) *sent
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	s := &sent{done: make(chan error, 1), cancel: cancel, peers: map[string]PeerView{}}
-	ready := make(chan struct{})
-	go func() {
-		s.done <- RunSend(ctx, cfg, srv, files, "test-sender", SendHooks{
-			OnRoom: func(room, secret string) { s.roomID, s.secret = room, secret; close(ready) },
-			OnPeer: func(v PeerView) { s.mu.Lock(); s.peers[v.ID] = v; s.mu.Unlock() },
-		})
-	}()
-	select {
-	case <-ready:
-	case <-time.After(10 * time.Second):
-		t.Fatal("room not created")
+	for attempt := 0; attempt < 5; attempt++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		s := &sent{done: make(chan error, 1), cancel: cancel, peers: map[string]PeerView{}}
+		ready := make(chan struct{})
+		go func() {
+			s.done <- RunSend(ctx, cfg, srv, files, "test-sender", SendHooks{
+				OnRoom: func(room, secret string) { s.roomID, s.secret = room, secret; close(ready) },
+				OnPeer: func(v PeerView) { s.mu.Lock(); s.peers[v.ID] = v; s.mu.Unlock() },
+			})
+		}()
+		select {
+		case <-ready:
+			t.Cleanup(cancel)
+			return s
+		case err := <-s.done:
+			cancel()
+			if err == nil || !strings.Contains(err.Error(), "too many requests") {
+				t.Fatalf("room not created: %v", err)
+			}
+			time.Sleep(6500 * time.Millisecond)
+		case <-time.After(10 * time.Second):
+			cancel()
+			t.Fatal("room not created (timeout)")
+		}
 	}
-	t.Cleanup(cancel)
-	return s
+	t.Fatal("room creation stayed rate limited")
+	return nil
 }
 
 func (s *sent) view() (PeerView, bool) {
@@ -267,9 +280,6 @@ func TestReceiverSurvivesCuttingTheLinkMidFile(t *testing.T) {
 func TestSenderLearnsTheTransferCompleted(t *testing.T) {
 	for _, relay := range []bool{false, true} {
 		cfg := config.Config{Server: serverURL, ForceRelay: relay}
-		if relay {
-			time.Sleep(7 * time.Second) // stay inside the server's room-creation rate limit
-		}
 		s := startSender(t, cfg, []protocol.Source{source(0, "x", pattern(300_000, 1)), source(1, "y", pattern(10, 2))})
 		if err := receive(t, cfg, s, t.TempDir(), ReceiveHooks{}); err != nil {
 			t.Fatal(err)
