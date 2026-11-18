@@ -2,5 +2,5 @@
   "semi": false,
   "singleQuote": false,
   "printWidth": 100,
-  "ignorePatterns": ["dist", "src/routeTree.gen.ts"]
+  "ignorePatterns": ["dist", "src/routeTree.gen.ts", "public"]
 }

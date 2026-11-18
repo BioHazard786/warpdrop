@@ -161,8 +161,8 @@ export class FrameCipher {
     return n
   }
 
-  /** kind 0 = text, 1 = binary */
-  async seal(kind: 0 | 1, payload: Uint8Array): Promise<Uint8Array> {
+  /** kind 0 = text, 1 = binary, 2 = keepalive (dropped by the transport) */
+  async seal(kind: 0 | 1 | 2, payload: Uint8Array): Promise<Uint8Array> {
     const pt = concat(Uint8Array.of(kind), payload)
     const ct = await subtle.encrypt(
       { name: "AES-GCM", iv: this.nonce(this.counter++) },
@@ -173,12 +173,12 @@ export class FrameCipher {
   }
 
   /** Throws on a bad tag, replay or reorder (the counter must match exactly). */
-  async open(wire: Uint8Array): Promise<{ kind: 0 | 1; payload: Uint8Array }> {
+  async open(wire: Uint8Array): Promise<{ kind: 0 | 1 | 2; payload: Uint8Array }> {
     const pt = new Uint8Array(
       await subtle.decrypt({ name: "AES-GCM", iv: this.nonce(this.counter) }, this.key, buf(wire)),
     )
     this.counter++
-    if (pt.length < 1 || pt[0]! > 1) throw new Error("bad frame kind")
-    return { kind: pt[0] as 0 | 1, payload: pt.subarray(1) }
+    if (pt.length < 1 || pt[0]! > 2) throw new Error("bad frame kind")
+    return { kind: pt[0] as 0 | 1 | 2, payload: pt.subarray(1) }
   }
 }

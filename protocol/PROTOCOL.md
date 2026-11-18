@@ -57,11 +57,11 @@ binary messages in both directions. Closed after 60 s idle. The server sees only
 
 `hello` and `auth` frames are plaintext. Everything after is AES-256-GCM with `sessionKey`, sent as one WebSocket binary message per frame:
 
-- plaintext = `kind(1) ‖ payload`, `kind` 0 = text (UTF-8 JSON), 1 = binary
+- plaintext = `kind(1) ‖ payload`, `kind` 0 = text (UTF-8 JSON), 1 = binary, 2 = keepalive (empty payload, sent every 20 s, dropped by the receiving transport so the server's 60 s idle limit cannot end a paused session)
 - nonce (12 B) = `dir(4, big-endian) ‖ counter(8, big-endian)`; `dir` 1 = sender→receiver, 2 = receiver→sender; counter starts at 0 per direction and increments per encrypted frame (ordered transport, so the nonce is not sent)
 - wire = `ciphertext ‖ 16-byte tag`
 
-A decrypt failure or counter gap closes the connection.
+Before the cipher is enabled only text WebSocket messages (`hello`, `auth`) are valid; a binary message arriving early is ciphertext and is held until the cipher is ready. A decrypt failure or counter gap closes the connection.
 
 ## 5. Transfer
 
