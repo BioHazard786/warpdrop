@@ -34,19 +34,44 @@ export const forceRelay = () =>
   e2e && new URLSearchParams(location.search).get("transport") === "relay"
 
 interface TestHooks {
-  closers: Set<() => void>
+  transports: Set<() => void>
+  signaling: Set<() => void>
+  /** How many live transports drop() has closed so far (lets a test prove its fault really fired). */
+  dropped: number
   /** Kill every live transport, as a network drop would. */
   drop(): void
+  /** Kill the signaling socket(s) only; the client must reconnect and resume. */
+  dropSignaling(): void
 }
+
+function hooks(): TestHooks {
+  const w = window as unknown as { __warpdropTest?: TestHooks }
+  return (w.__warpdropTest ??= {
+    transports: new Set(),
+    signaling: new Set(),
+    dropped: 0,
+    drop() {
+      for (const c of this.transports) {
+        this.dropped++
+        c()
+      }
+    },
+    dropSignaling() {
+      for (const c of this.signaling) c()
+    },
+  })
+}
+
 export function registerTransport(close: () => void): () => void {
   if (!e2e) return () => {}
-  const w = window as unknown as { __warpdropTest?: TestHooks }
-  w.__warpdropTest ??= {
-    closers: new Set(),
-    drop() {
-      for (const c of this.closers) c()
-    },
-  }
-  w.__warpdropTest.closers.add(close)
-  return () => w.__warpdropTest!.closers.delete(close)
+  const set = hooks().transports
+  set.add(close)
+  return () => set.delete(close)
+}
+
+export function registerSignaling(close: () => void): () => void {
+  if (!e2e) return () => {}
+  const set = hooks().signaling
+  set.add(close)
+  return () => set.delete(close)
 }

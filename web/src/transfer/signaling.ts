@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { registerSignaling } from "./device"
 
 const peerId = z.string().max(64)
 const serverMsg = z.discriminatedUnion("t", [
@@ -40,6 +41,7 @@ export class Signaling {
     this.o.onStatus?.(this.everOpen ? "reconnecting" : "connecting")
     const ws = new WebSocket(this.o.url)
     this.ws = ws
+    const unregister = registerSignaling(() => ws.close()) // E2E builds only
     ws.onopen = () => {
       this.attempt = 0
       this.o.onStatus?.("open")
@@ -58,6 +60,7 @@ export class Signaling {
       if (m.success) this.o.onMessage(m.data)
     }
     ws.onclose = () => {
+      unregister()
       if (this.ws !== ws || this.stopped) return
       const delay = Math.min(8000, 500 * 2 ** this.attempt++) * (0.75 + Math.random() * 0.5)
       this.o.onStatus?.("reconnecting")

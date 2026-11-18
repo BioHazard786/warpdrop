@@ -10,6 +10,8 @@ describe("format", () => {
     expect(formatBytes(1536)).toBe("1.5 KB")
     expect(formatBytes(5 * 1024 ** 3)).toBe("5.0 GB")
     expect(formatBytes(1e30)).toMatch(/PB$/)
+    // regression: a stalled transfer's smoothed speed decays to denormals and used to render "Infinity undefined/s"
+    for (const tiny of [5e-324, 1e-300, 0.4, 0.999]) expect(formatBytes(tiny)).toBe("0 B")
   })
   it("formats ETA", () => {
     expect(formatETA(0)).toBe("--")

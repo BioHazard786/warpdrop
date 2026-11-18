@@ -243,7 +243,7 @@ export class ReceiverClient {
         return this.end("done")
       }
       if (r.status === "failed") {
-        const reason = REASONS[r.reason] ?? r.reason
+        const reason = r.error ?? REASONS[r.reason] ?? r.reason
         return this.end("failed", reason, r.reason)
       }
       if (this.attempt > MAX_RECONNECTS)

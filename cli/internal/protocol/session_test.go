@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -387,4 +388,32 @@ func TestLargeManifest(t *testing.T) {
 	if r := wait(t, y.rRes); r.Status != StatusFailed {
 		t.Fatalf("receiver: %v", r)
 	}
+}
+
+// slowAfterFileEnd pauses the sender right after file_end has been delivered, which is exactly the window in which a
+// fast receiver's file_done used to overtake the sender's own "streamed" event.
+type slowAfterFileEnd struct{ Transport }
+
+func (w slowAfterFileEnd) SendText(s string) error {
+	err := w.Transport.SendText(s)
+	if strings.Contains(s, `"t":"file_end"`) {
+		time.Sleep(40 * time.Millisecond)
+	}
+	return err
+}
+
+// Regression (found as a ~1-in-8 flake in TestLargeManifest): the receiver's file_done must never be able to arrive
+// at the sender's state machine before the sender knows it finished streaming.
+func TestFastReceiverDoneNeverOvertakesStreamed(t *testing.T) {
+	st, rt := NewMemPair(false)
+	files := []Source{src(0, "a", pattern(10, 1)), src(1, "b", pattern(10, 2)), src(2, "c", pattern(10, 3))}
+	sink, state := newSink(), &ReceiveState{}
+	sRes := make(chan Result, 1)
+	go func() {
+		sRes <- RunSender(context.Background(), slowAfterFileEnd{st}, SenderOptions{RoomID: testRoom, Secret: testSecret, Device: "s", Files: files})
+	}()
+	r := RunReceiver(context.Background(), rt, ReceiverOptions{RoomID: testRoom, Secret: testSecret, Device: "r", Sink: sink, State: state,
+		OnOffer: func([]NamedFile) bool { return true }})
+	expect(t, r, StatusDone, "", false)
+	expect(t, wait(t, sRes), StatusDone, "", false)
 }

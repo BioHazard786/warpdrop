@@ -360,3 +360,36 @@ describe("giving up", () => {
     expect(x.state.cur).toBeNull()
   })
 })
+
+describe("a download that stops accepting data", () => {
+  it("fails with a clear message instead of hanging forever (found while streaming 5 GB in Firefox)", async () => {
+    const stuck = new MemSink()
+    stuck.open = async () => ({
+      write: () => new Promise<void>(() => {}), // never settles, like a download the browser stopped consuming
+      close: async () => {},
+      abort: async () => {},
+    })
+    const [st, rt] = memoryPair()
+    const s = new SenderSession({
+      transport: st,
+      roomId: ROOM,
+      secret: SECRET,
+      device: "s",
+      files: [fileFrom(0, "x", pattern(100_000))],
+    })
+    const r = new ReceiverSession({
+      transport: rt,
+      roomId: ROOM,
+      secret: SECRET,
+      device: "r",
+      sink: stuck,
+      state: new ReceiveState(),
+      onOffer: async () => true,
+      sinkTimeoutMs: 150,
+    })
+    const [sRes, rRes] = await Promise.all([s.run(), r.run()])
+    expect(rRes).toMatchObject({ status: "failed", reason: "protocol_error" })
+    expect((rRes as { error?: string }).error).toMatch(/browser stopped accepting data/)
+    expect(sRes).toMatchObject({ status: "failed", byPeer: true }) // the sender is told too, so it stops
+  }, 10_000)
+})

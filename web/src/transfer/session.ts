@@ -40,9 +40,24 @@ import { type Transport, type Wire, chunkSizeFor } from "./transport"
 /** No frame for this long while a transfer is in flight means the link is dead (NAT timeout, sleeping laptop). */
 export const STALL_MS = 30_000
 
+/** A sink (the browser's download) that accepts nothing for this long is treated as broken, not slow. */
+export const SINK_STALL_MS = 60_000
+
+/** Rejects if `p` has not settled within `ms`, so a stuck download surfaces as an error instead of a silent hang. */
+function bounded<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const timeout = new Promise<never>((_, rej) => {
+    timer = setTimeout(
+      () => rej(new Error(`${what} stalled: the browser stopped accepting data`)),
+      ms,
+    )
+  })
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer))
+}
+
 export type Result =
   | { status: "done" }
-  | { status: "failed"; reason: CancelReason; byPeer: boolean }
+  | { status: "failed"; reason: CancelReason; byPeer: boolean; error?: string } // error: local cause, when there is one
   | { status: "closed" } // transport lost; the caller may resume on a new one
 
 // ------------------------------------------------------------------ inbox
@@ -366,6 +381,8 @@ export interface ReceiverOptions {
   onOffer: (files: (FileEntry & { safeName: string })[]) => Promise<boolean>
   onProgress?: (idx: number, bytes: number) => void
   onFileDone?: (idx: number) => void
+  /** Overrides SINK_STALL_MS (tests). */
+  sinkTimeoutMs?: number
 }
 
 export class ReceiverSession {
@@ -432,7 +449,7 @@ export class ReceiverSession {
   private enqueue(ev: REvent, chunk?: Uint8Array) {
     this.chain = this.chain
       .then(() => this.step(ev, chunk))
-      .catch(() => this.fail("protocol_error"))
+      .catch((e) => this.fail("protocol_error", e instanceof Error ? e.message : String(e)))
   }
 
   private async step(ev: REvent, chunk?: Uint8Array) {
@@ -445,7 +462,11 @@ export class ReceiverSession {
 
   private async writeChunk(chunk: Uint8Array) {
     const cur = this.st.cur!
-    await cur.writer.write(chunk)
+    await bounded(
+      cur.writer.write(chunk),
+      this.o.sinkTimeoutMs ?? SINK_STALL_MS,
+      "writing the download",
+    )
     cur.hasher.update(chunk)
     cur.bytes += chunk.length
     this.st.sinceAck += chunk.length
@@ -494,7 +515,11 @@ export class ReceiverSession {
         break
       }
       case "finish_file": {
-        await st.cur!.writer.close()
+        await bounded(
+          st.cur!.writer.close(),
+          this.o.sinkTimeoutMs ?? SINK_STALL_MS,
+          "finishing the download",
+        )
         st.cur = null
         st.nextIdx = fx.idx + 1
         this.o.onFileDone?.(fx.idx)
@@ -513,11 +538,11 @@ export class ReceiverSession {
     }
   }
 
-  private fail(reason: CancelReason) {
+  private fail(reason: CancelReason, error?: string) {
     this.t.send(encodeFrame({ t: "cancel", reason }))
     void this.st.cur?.writer.abort().catch(() => {})
     this.st.cur = null
-    this.resolve({ status: "failed", reason, byPeer: false })
+    this.resolve({ status: "failed", reason, byPeer: false, error })
     this.t.close()
   }
 }

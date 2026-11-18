@@ -1,12 +1,13 @@
+
 // This will prevent the sw from restarting
 let keepAlive = () => {
   keepAlive = () => {}
-  var ping = location.href.substr(0, location.href.lastIndexOf("/")) + "/ping"
+  var ping = location.href.substr(0, location.href.lastIndexOf('/')) + '/ping'
   var interval = setInterval(() => {
     if (sw) {
-      sw.postMessage("ping")
+      sw.postMessage('ping')
     } else {
-      fetch(ping).then((res) => res.text(!res.ok && clearInterval(interval)))
+      fetch(ping).then(res => res.text(!res.ok && clearInterval(interval)))
     }
   }, 10000)
 }
@@ -17,42 +18,33 @@ let keepAlive = () => {
 // but since we need to wait for the Service Worker registration, we store the
 // message for later
 let messages = []
-window.onmessage = (evt) => messages.push(evt)
+window.onmessage = evt => messages.push(evt)
 
 let sw = null
-let scope = ""
+let scope = ''
 
 function registerWorker() {
-  return navigator.serviceWorker
-    .getRegistration("./")
-    .then((swReg) => {
-      return swReg || navigator.serviceWorker.register("sw.js", { scope: "./" })
-    })
-    .then((swReg) => {
-      const swRegTmp = swReg.installing || swReg.waiting
+  return navigator.serviceWorker.getRegistration('./').then(swReg => {
+    return swReg || navigator.serviceWorker.register('sw.js', { scope: './' })
+  }).then(swReg => {
+    const swRegTmp = swReg.installing || swReg.waiting
 
-      scope = swReg.scope
+    scope = swReg.scope
 
-      return (
-        (sw = swReg.active) ||
-        new Promise((resolve) => {
-          swRegTmp.addEventListener(
-            "statechange",
-            (fn = () => {
-              if (swRegTmp.state === "activated") {
-                swRegTmp.removeEventListener("statechange", fn)
-                sw = swReg.active
-                resolve()
-              }
-            }),
-          )
-        })
-      )
+    return (sw = swReg.active) || new Promise(resolve => {
+      swRegTmp.addEventListener('statechange', fn = () => {
+        if (swRegTmp.state === 'activated') {
+          swRegTmp.removeEventListener('statechange', fn)
+          sw = swReg.active
+          resolve()
+        }
+      })
     })
+  })
 }
 
 // Now that we have the Service Worker registered we can process messages
-function onMessage(event) {
+function onMessage (event) {
   let { data, ports, origin } = event
 
   // It's important to have a messageChannel, don't want to interfere
@@ -61,7 +53,7 @@ function onMessage(event) {
     throw new TypeError("[StreamSaver] You didn't send a messageChannel")
   }
 
-  if (typeof data !== "object") {
+  if (typeof data !== 'object') {
     throw new TypeError("[StreamSaver] You didn't send a object")
   }
 
@@ -74,17 +66,15 @@ function onMessage(event) {
   data.referrer = data.referrer || document.referrer || origin
 
   // pass along version for possible backwards compatibility in sw.js
-  data.streamSaverVersion = new URLSearchParams(location.search).get("version")
+  data.streamSaverVersion = new URLSearchParams(location.search).get('version')
 
-  if (data.streamSaverVersion === "1.2.0") {
-    console.warn("[StreamSaver] please update streamsaver")
+  if (data.streamSaverVersion === '1.2.0') {
+    console.warn('[StreamSaver] please update streamsaver')
   }
 
   /** @since v2.0.0 */
   if (!data.headers) {
-    console.warn(
-      "[StreamSaver] pass `data.headers` that you would like to pass along to the service worker\nit should be a 2D array or a key/val object that fetch's Headers api accepts",
-    )
+    console.warn("[StreamSaver] pass `data.headers` that you would like to pass along to the service worker\nit should be a 2D array or a key/val object that fetch's Headers api accepts")
   } else {
     // test if it's correct
     // should thorw a typeError if not
@@ -92,45 +82,39 @@ function onMessage(event) {
   }
 
   /** @since v2.0.0 */
-  if (typeof data.filename === "string") {
-    console.warn(
-      "[StreamSaver] You shouldn't send `data.filename` anymore. It should be included in the Content-Disposition header option",
-    )
+  if (typeof data.filename === 'string') {
+    console.warn("[StreamSaver] You shouldn't send `data.filename` anymore. It should be included in the Content-Disposition header option")
     // Do what File constructor do with fileNames
-    data.filename = data.filename.replace(/\//g, ":")
+    data.filename = data.filename.replace(/\//g, ':')
   }
 
   /** @since v2.0.0 */
   if (data.size) {
-    console.warn(
-      "[StreamSaver] You shouldn't send `data.size` anymore. It should be included in the content-length header option",
-    )
+    console.warn("[StreamSaver] You shouldn't send `data.size` anymore. It should be included in the content-length header option")
   }
 
   /** @since v2.0.0 */
   if (data.readableStream) {
-    console.warn(
-      "[StreamSaver] You should send the readableStream in the messageChannel, not throught mitm",
-    )
+    console.warn("[StreamSaver] You should send the readableStream in the messageChannel, not throught mitm")
   }
 
   /** @since v2.0.0 */
   if (!data.pathname) {
     console.warn("[StreamSaver] Please send `data.pathname` (eg: /pictures/summer.jpg)")
-    data.pathname = Math.random().toString().slice(-6) + "/" + data.filename
+    data.pathname = Math.random().toString().slice(-6) + '/' + data.filename
   }
 
   // remove all leading slashes
-  data.pathname = data.pathname.replace(/^\/+/g, "")
+  data.pathname = data.pathname.replace(/^\/+/g, '')
 
   // remove protocol
-  let org = origin.replace(/(^\w+:|^)\/\//, "")
+  let org = origin.replace(/(^\w+:|^)\/\//, '')
 
   // set the absolute pathname to the download url.
   data.url = new URL(`${scope + org}/${data.pathname}`).toString()
 
   if (!data.url.startsWith(`${scope + org}/`)) {
-    throw new TypeError("[StreamSaver] bad `data.pathname`")
+    throw new TypeError('[StreamSaver] bad `data.pathname`')
   }
 
   // This sends the message data as well as transferring
@@ -138,11 +122,14 @@ function onMessage(event) {
   // then use the transferred port to reply via postMessage(), which
   // will in turn trigger the onmessage handler on messageChannel.port1.
 
-  const transferable = data.readableStream ? [ports[0], data.readableStream] : [ports[0]]
+  const transferable = data.readableStream
+    ? [ ports[0], data.readableStream ]
+    : [ ports[0] ]
 
-  if (!(data.readableStream || data.transferringReadable)) {
-    keepAlive()
-  }
+
+  // Stock StreamSaver only does this for non-transferable streams, but Firefox (which does support transferable
+  // streams) reaps an event-less service worker mid-download (~30-60 s), so the keepalive must always run.
+  keepAlive()
 
   return sw.postMessage(data, transferable)
 }
@@ -150,7 +137,7 @@ function onMessage(event) {
 if (window.opener) {
   // The opener can't listen to onload event, so we need to help em out!
   // (telling them that we are ready to accept postMessage's)
-  window.opener.postMessage("StreamSaver::loadedPopup", "*")
+  window.opener.postMessage('StreamSaver::loadedPopup', '*')
 }
 
 if (navigator.serviceWorker) {
@@ -163,3 +150,4 @@ if (navigator.serviceWorker) {
   // shouldn't really be possible?
   keepAlive()
 }
+

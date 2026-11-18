@@ -348,10 +348,11 @@ func (s *sender) streamFile(ctx context.Context, idx int, offset int64) {
 			s.o.OnProgress(idx, sent)
 		}
 	}
-	if s.t.SendText(Encode(NewFileEnd(src.Entry.ID, hexU64(h.Sum64())))) != nil {
-		return
-	}
+	// Post "streamed" BEFORE sending file_end. The receiver can only answer file_done after it has file_end, and the
+	// reader goroutine posts into the same ordered channel, so this guarantees the machine sees streamed first.
+	// (Sending first leaves a window where a fast receiver's file_done overtakes it and reads as a protocol error.)
 	s.post(ctx, SEvent{K: SEvStreamed, Idx: idx})
+	_ = s.t.SendText(Encode(NewFileEnd(src.Entry.ID, hexU64(h.Sum64()))))
 }
 
 // ------------------------------------------------------------------ receiver
