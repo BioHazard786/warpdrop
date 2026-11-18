@@ -1,5 +1,5 @@
 # Multi-stage build for Go installer serive
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 WORKDIR /app
 
@@ -16,5 +16,6 @@ WORKDIR /app
 
 COPY --from=builder /app/installer .
 
+USER 65532:65532
 EXPOSE 8000
 ENTRYPOINT ["./installer"]
