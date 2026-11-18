@@ -63,6 +63,7 @@ All optional. Set them in `.env` (compose passes them to the container).
 | `RATE_LIMIT_SCALE` | `1` | Multiplies the per-IP limits (below). Raise it when many people share one address. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
 | `LOG_FORMAT` | `json` | `json` for production, `text` for plain key=value lines, `color` for tinted local output (no colors when not a terminal). |
+| `INSTALL_URL` | empty | Host of your CLI installer, e.g. `install-drop.warplabs.info`. The web UI shows `curl -fsSL <INSTALL_URL> \| bash`; empty hides the install command. |
 | `STUN_URLS` | Google STUN | STUN servers, comma separated. |
 | `TURN_URLS`, `TURN_SECRET` | empty | TURN is offered to clients only when **both** are set. |
 

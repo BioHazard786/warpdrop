@@ -103,6 +103,7 @@ const configSchema = z.object({
   ),
   relay: z.boolean(),
   maxReceivers: z.number(),
+  install: z.string().optional(),
 })
 export type AppConfig = z.infer<typeof configSchema>
 

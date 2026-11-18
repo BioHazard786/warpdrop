@@ -21,6 +21,8 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       # peers whose X-Forwarded-For is trusted: loopback plus Docker's bridge ranges, where a host proxy appears from
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1,172.16.0.0/12}
+      # where the CLI installer is served; empty hides the install command in the web UI
+      INSTALL_URL: ${INSTALL_URL:-}
       STUN_URLS: ${STUN_URLS:-stun:stun.l.google.com:19302}
       # TURN is used only when BOTH of these are set
       TURN_URLS: ${TURN_URLS:-}

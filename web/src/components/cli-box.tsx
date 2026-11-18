@@ -6,14 +6,12 @@ import {
   CodeBlockLine,
 } from "@/components/ui/code-block"
 
-export const INSTALL_CMD = "curl -fsSL install-drop.warplabs.info | bash"
-
 /** One-line terminal command with a copy button. */
 export function CliBox({
-  command = INSTALL_CMD,
+  command,
   prompt = true,
 }: {
-  command?: string
+  command: string
   /** show the leading `$`; off for things that aren't shell commands, like a link */
   prompt?: boolean
 }) {
