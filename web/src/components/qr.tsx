@@ -1,8 +1,17 @@
 import QRCodeStyling from "qr-code-styling"
 import { useEffect, useRef } from "react"
+import { cn } from "@/lib/utils"
 
 /** Always dark-on-white: scanners read it best, whatever the page theme is. */
-export function QR({ value, size = 168 }: { value: string; size?: number }) {
+export function QR({
+  value,
+  size = 160,
+  className,
+}: {
+  value: string
+  size?: number
+  className?: string
+}) {
   const host = useRef<HTMLDivElement>(null)
   const qr = useRef<QRCodeStyling | null>(null)
   useEffect(() => {
@@ -23,7 +32,10 @@ export function QR({ value, size = 168 }: { value: string; size?: number }) {
   return (
     <div
       ref={host}
-      className="inline-block rounded-md bg-white p-2"
+      className={cn(
+        "inline-block shrink-0 rounded-xl bg-white p-3 ring-1 ring-foreground/10",
+        className,
+      )}
       role="img"
       aria-label="QR code for the share link"
     />

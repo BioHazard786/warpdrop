@@ -33,7 +33,7 @@ var receiveCmd = &cobra.Command{
 
 Examples:
   warpdrop receive 4821-amber-otter-kite-moth
-  warpdrop receive 'https://warpdrop.qzz.io/r/4821#amber-otter-kite-moth' --dir ~/Downloads
+  warpdrop receive 'https://drop.warplabs.info/r/4821#amber-otter-kite-moth' --dir ~/Downloads
   warpdrop receive 4821-amber-otter-kite-moth --yes --zip`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error { return runReceive(cmd.Context(), args[0]) },

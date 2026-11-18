@@ -1,9 +1,19 @@
-import { IconX } from "@tabler/icons-react"
+import { IconDeviceDesktop, IconDeviceMobile, IconX } from "@tabler/icons-react"
+import { TransportBadge } from "@/components/transport-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
 import { formatBytes, formatETA, formatSpeed } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import type { PeerRow as Peer } from "@/store/send"
 
 const LABEL: Record<Peer["status"], string> = {
@@ -20,24 +30,37 @@ export function PeerRow({ peer, onCancel }: { peer: Peer; onCancel: () => void }
     : peer.status === "done"
       ? 100
       : 0
-  const live =
-    peer.status === "sending" || peer.status === "authenticating" || peer.status === "connecting"
+  const busy = peer.status === "connecting" || peer.status === "authenticating"
+  const live = busy || peer.status === "sending"
+  const DeviceIcon = /android|iphone|ipad|mobile/i.test(peer.device)
+    ? IconDeviceMobile
+    : IconDeviceDesktop
   return (
-    <li className="space-y-2 rounded-lg border border-border p-3">
-      <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{peer.device}</span>
-        {peer.transport && (
-          <Badge
-            variant="outline"
-            title={
-              peer.transport === "rtc"
-                ? "Direct peer-to-peer connection"
-                : "Through the server, still end-to-end encrypted"
-            }
-          >
-            {peer.transport === "rtc" ? "P2P" : "RELAY"}
-          </Badge>
-        )}
+    <Item variant="outline" render={<li />} className="rounded-xl">
+      <ItemMedia variant="icon" className="size-9 rounded-lg bg-muted">
+        <DeviceIcon />
+      </ItemMedia>
+      <ItemContent className="min-w-0">
+        <ItemTitle className="w-full truncate">{peer.device}</ItemTitle>
+        <ItemDescription className="font-mono text-xs tabular-nums">
+          {peer.status === "failed" ? (
+            <span className="text-destructive">{peer.reason ?? "Transfer stopped"}</span>
+          ) : peer.status === "sending" ? (
+            <>
+              {formatBytes(peer.sent)} / {formatBytes(peer.total)} · {formatSpeed(peer.speed)} ·{" "}
+              {formatETA(peer.eta)}
+            </>
+          ) : peer.status === "done" ? (
+            <>
+              {formatBytes(peer.total)} · {peer.filesDone} {peer.filesDone === 1 ? "file" : "files"}
+            </>
+          ) : (
+            <span className="shimmer">Setting up an encrypted channel</span>
+          )}
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        {peer.transport && <TransportBadge transport={peer.transport} />}
         <Badge
           variant={
             peer.status === "failed"
@@ -47,7 +70,7 @@ export function PeerRow({ peer, onCancel }: { peer: Peer; onCancel: () => void }
                 : "secondary"
           }
         >
-          {peer.status === "connecting" || peer.status === "authenticating" ? <Spinner /> : null}
+          {busy && <Spinner data-icon="inline-start" />}
           {LABEL[peer.status]}
         </Badge>
         {live && (
@@ -60,26 +83,14 @@ export function PeerRow({ peer, onCancel }: { peer: Peer; onCancel: () => void }
             <IconX />
           </Button>
         )}
-      </div>
+      </ItemActions>
       {(peer.status === "sending" || peer.status === "done") && (
-        <>
-          <Progress value={pct} aria-label={`Progress for ${peer.device}`} />
-          <div className="flex justify-between font-mono text-xs text-muted-foreground tabular-nums">
-            <span>
-              {formatBytes(peer.sent)} / {formatBytes(peer.total)}
-              {peer.total > 0 && ` · ${peer.filesDone} files done`}
-            </span>
-            {peer.status === "sending" && (
-              <span>
-                {formatSpeed(peer.speed)} · {formatETA(peer.eta)}
-              </span>
-            )}
-          </div>
-        </>
+        <Progress
+          value={pct}
+          aria-label={`Progress for ${peer.device}`}
+          className={cn("basis-full", peer.status === "done" && "opacity-40")}
+        />
       )}
-      {peer.status === "failed" && peer.reason && (
-        <p className="text-xs text-destructive">{peer.reason}</p>
-      )}
-    </li>
+    </Item>
   )
 }

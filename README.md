@@ -2,8 +2,8 @@
 
 Privacy-first, self-hostable file sharing, device to device. Like AirDrop, but for people who don't trust "The Cloud™️" or just want to feel like a hacker sending files from a terminal.
 
-- **Web**: [warpdrop.qzz.io](https://warpdrop.qzz.io)
-- **CLI**: `curl -fsSL install.warpdrop.qzz.io | bash`
+- **Web**: [drop.warplabs.info](https://drop.warplabs.info)
+- **CLI**: `curl -fsSL install-drop.warplabs.info | bash`
   - **Scoop (Windows)**: `scoop bucket add biohazard786 https://github.com/BioHazard786/scoop-bucket.git && scoop install biohazard786/warpdrop`
   - **Brew (macOS)**: `brew tap BioHazard786/tap && brew install --cask warpdrop`
 - **Self-hosting**: [DEPLOY.md](DEPLOY.md), one container and a reverse proxy.
@@ -25,8 +25,8 @@ One share code serves up to 10 receivers at once.
 
 ### What the server can and cannot see
 
-| Can see | Cannot see |
-|---|---|
+| Can see                                                                                           | Cannot see                                  |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | The room number, IP addresses, timing, how many bytes moved, device labels like "Chrome on Linux" | The secret words, file names, file contents |
 
 That holds for the relay too. The one thing to know: this is end-to-end encryption between you and whoever has the code. Anyone you give the full code to can receive the files.
@@ -41,7 +41,7 @@ Send from a terminal, receive in a browser (or the reverse). Same protocol, same
 # send
 warpdrop send report.pdf photos.zip
 #   Code:  4821-amber-otter-kite-moth
-#   Link:  https://warpdrop.qzz.io/r/4821#amber-otter-kite-moth
+#   Link:  https://drop.warplabs.info/r/4821#amber-otter-kite-moth
 
 # receive (code or full link)
 warpdrop receive 4821-amber-otter-kite-moth
@@ -106,6 +106,6 @@ Web and CLI crypto are checked against the same known-answer vectors (`protocol/
 
 ## Credits
 
-Inspired by [FilePizza](https://file.pizza), [fs-cli](https://github.com/spectre10/fs-cli), and [croc](https://github.com/schollz/croc). Reimagined because I wanted to learn WebRTC and needed a project to procrastinate on my actual work.
+Inspired by [FilePizza](https://github.com/kern/filepizza), [fs-cli](https://github.com/spectre10/fs-cli), and [croc](https://github.com/schollz/croc). Reimagined because I wanted to learn WebRTC and needed a project to procrastinate on my actual work.
 
 The public demo runs on an Oracle Cloud Free Tier instance because I'm cheap. If it's down, host it yourself.

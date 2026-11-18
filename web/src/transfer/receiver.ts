@@ -88,6 +88,7 @@ export class ReceiverClient {
   async start() {
     this.status("connecting")
     this.config = await fetchConfig().catch(() => FALLBACK_CONFIG)
+    if (this.ended) return // cancelled while waiting (React StrictMode's remount, or navigating away): don't join the room as a ghost receiver
     this.sig = new Signaling({
       url: wsUrl("/ws"),
       onOpen: () => {}, // joining is driven by connect(), not by the socket

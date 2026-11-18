@@ -14,11 +14,11 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-const DefaultServer = "https://warpdrop.qzz.io"
+const DefaultServer = "https://drop.warplabs.info"
 
 // Config is what the user chose on the command line.
 type Config struct {
-	Server     string // base URL, e.g. https://warpdrop.qzz.io or http://localhost:8080
+	Server     string // base URL, e.g. https://drop.warplabs.info or http://localhost:8080
 	ForceRelay bool   // skip WebRTC and use the encrypted relay
 }
 

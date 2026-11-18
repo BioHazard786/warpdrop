@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/BioHazard786/Warpdrop/backend/internal/config"
+	"github.com/BioHazard786/Warpdrop/backend/internal/logging"
 	"github.com/BioHazard786/Warpdrop/backend/internal/server"
 	"github.com/BioHazard786/Warpdrop/backend/web"
 )
@@ -32,7 +32,7 @@ func main() {
 		return
 	}
 
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	logging.Setup(os.Stdout, cfg.LogLevel, cfg.LogFormat)
 	s, h := server.New(cfg, web.FS())
 	stop := make(chan struct{})
 	go s.Janitor(stop)
@@ -53,9 +53,10 @@ func main() {
 		_ = srv.Shutdown(sd)
 	}()
 
-	slog.Info("listening", "addr", srv.Addr, "relay", cfg.RelayEnabled, "turn", cfg.TURNSecret != "")
+	slog.Info("listening", "addr", srv.Addr, "level", cfg.LogLevel, "format", cfg.LogFormat, "relay", cfg.RelayEnabled, "turn", cfg.TURNSecret != "")
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		fmt.Fprintln(os.Stderr, err)
+		slog.Error("server failed", "err", err)
 		os.Exit(1)
 	}
+	slog.Info("shutting down")
 }

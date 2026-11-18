@@ -1,25 +1,28 @@
+import { Marker, MarkerContent } from "@/components/ui/marker"
 import type { ReactNode } from "react"
 
-/** Mono uppercase section label, the page's main structural device. */
+/** Pixel-font section label over a hairline, the page's main structural device. */
 export function Section({
   title,
   aside,
   children,
 }: {
-  title: string
+  title: ReactNode
   aside?: ReactNode
   children: ReactNode
 }) {
   return (
-    <section className="space-y-3">
-      <div className="flex items-baseline justify-between gap-3 border-b border-border pb-2">
-        <h2 className="font-mono text-xs tracking-widest text-muted-foreground uppercase">
+    <section className="flex flex-col gap-3">
+      <Marker variant="border" className="justify-between gap-3">
+        <MarkerContent className="font-mono text-xs tracking-wider text-muted-foreground uppercase">
           {title}
-        </h2>
+        </MarkerContent>
         {aside && (
-          <div className="font-mono text-xs text-muted-foreground tabular-nums">{aside}</div>
+          <span className="flex items-center gap-2 font-mono text-xs text-muted-foreground tabular-nums">
+            {aside}
+          </span>
         )}
-      </div>
+      </Marker>
       {children}
     </section>
   )

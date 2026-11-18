@@ -58,9 +58,9 @@ const REASONS: Record<string, string> = {
 
 /** One sender room: owns the signaling socket and one PeerLink per receiver. */
 export class SenderRoom {
-  private sources: FileSource[]
-  private prefix: number[] // prefix[i] = bytes in files before i; files are served in order
-  readonly total: number
+  private sources: FileSource[] = []
+  private prefix: number[] = [] // prefix[i] = bytes in files before i; files are served in order
+  total = 0
   private emit: (e: SenderEvent) => void
   private sig: Signaling | null = null
   private links = new Map<string, PeerLink>()
@@ -72,6 +72,11 @@ export class SenderRoom {
   config: AppConfig = FALLBACK_CONFIG
 
   constructor(files: File[], emit: (e: SenderEvent) => void) {
+    this.load(files)
+    this.emit = emit
+  }
+
+  private load(files: File[]) {
     this.sources = files.map((f, i) => fileSource(f, i))
     this.prefix = []
     let acc = 0
@@ -80,17 +85,35 @@ export class SenderRoom {
       acc += f.size
     }
     this.total = acc
-    this.emit = emit
+  }
+
+  /** Why this file list can't be shared, or null. */
+  private problem(sources: FileSource[]) {
+    if (sources.length === 0) return "Choose at least one file."
+    const manifest = JSON.stringify(
+      sources.map(({ id, name, size, type }) => ({ id, name, size, type })),
+    )
+    if (sources.length > MAX_FILES || manifest.length > MAX_MANIFEST_BYTES)
+      return "Too many files for one transfer. Put them in a zip first."
+    return null
+  }
+
+  /**
+   * Swap the shared files. Refused once any receiver has joined: its manifest is built from this list
+   * when its connection opens, so a change afterwards would leave it with a stale offer.
+   * Returns an error message, or null on success.
+   */
+  setFiles(files: File[]) {
+    if (this.links.size > 0) return "Files can't change once someone has joined."
+    const err = this.problem(files.map((f, i) => fileSource(f, i)))
+    if (err) return err
+    this.load(files)
+    return null
   }
 
   async start() {
-    const manifest = JSON.stringify(
-      this.sources.map(({ id, name, size, type }) => ({ id, name, size, type })),
-    )
-    if (this.sources.length === 0) return this.fatal("Choose at least one file.")
-    if (this.sources.length > MAX_FILES || manifest.length > MAX_MANIFEST_BYTES) {
-      return this.fatal("Too many files for one transfer. Put them in a zip first.")
-    }
+    const err = this.problem(this.sources)
+    if (err) return this.fatal(err)
     this.emit({ t: "status", status: "starting" })
     this.config = await fetchConfig().catch(() => FALLBACK_CONFIG)
     this.sig = new Signaling({

@@ -103,6 +103,7 @@ func (s *Server) checkOrigin(r *http.Request) bool {
 			return true
 		}
 	}
+	slog.Warn("origin rejected", "origin", o, "host", r.Host, "path", r.URL.Path)
 	return false
 }
 
@@ -147,13 +148,15 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) string {
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	ip := ClientIP(r, s.cfg.TrustedProxies)
 	if !s.conns.Acquire(ip) {
+		slog.Warn("too many connections", "ip", ip, "max", maxConnsPerIP)
 		http.Error(w, "too many connections", http.StatusTooManyRequests)
 		return
 	}
 	defer s.conns.Release(ip)
 	conn, err := s.up.Upgrade(w, r, nil)
 	if err != nil {
-		return // Upgrade already wrote the response
+		slog.Debug("ws upgrade failed", "ip", ip, "err", err) // Upgrade already wrote the response
+		return
 	}
 	signaling.NewClient(s.hub, conn, ip).Serve()
 }
@@ -163,7 +166,7 @@ func (s *Server) serveConfig(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(c); err != nil {
-		slog.Warn("config encode", "err", err)
+		slog.Warn("config encode failed", "err", err)
 	}
 }
 

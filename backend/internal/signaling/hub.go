@@ -93,6 +93,7 @@ func randHex(n int) string {
 func (h *Hub) handle(c *Client, raw []byte) {
 	var m in
 	if json.Unmarshal(raw, &m) != nil || len(m.Client) > 1024 {
+		slog.Debug("malformed message", "ip", c.ip, "bytes", len(raw))
 		c.send(errMsg(ErrBadRequest, "malformed message"))
 		return
 	}
@@ -111,9 +112,10 @@ func (h *Hub) handle(c *Client, raw []byte) {
 		h.relayRequest(c, m)
 	case "close_room":
 		if c.room != nil && c.room.sender == c {
-			h.closeRoom(c.room)
+			h.closeRoom(c.room, "sender closed")
 		}
 	default:
+		slog.Debug("unknown message type", "ip", c.ip, "type", m.T)
 		c.send(errMsg(ErrBadRequest, "unknown message type"))
 	}
 }
@@ -128,17 +130,20 @@ func (h *Hub) create(c *Client, m in) {
 		return
 	}
 	if !h.Create.Allow(c.ip) {
+		slog.Warn("rate limited", "action", "create_room", "ip", c.ip)
 		c.send(errMsg(ErrRateLimited, "too many rooms"))
 		return
 	}
 	id := h.newID()
 	if id == "" {
+		slog.Error("no free room id", "rooms", len(h.rooms))
 		c.send(errMsg(ErrRateLimited, "server busy"))
 		return
 	}
 	r := &Room{id: id, token: randHex(16), sender: c, receivers: map[string]*Client{}}
 	h.rooms[id] = r
 	c.room, c.peerID = r, "sender"
+	slog.Info("room created", "ip", c.ip, "rooms", len(h.rooms))
 	c.send(msg(map[string]any{"t": "room_created", "room_id": id, "token": r.token}))
 }
 
@@ -163,6 +168,7 @@ func (h *Hub) newID() string {
 func (h *Hub) resume(c *Client, m in) {
 	r := h.rooms[m.RoomID]
 	if r == nil || subtle.ConstantTimeCompare([]byte(r.token), []byte(m.Token)) != 1 {
+		slog.Info("resume rejected", "ip", c.ip, "found", r != nil)
 		c.send(errMsg(ErrNotFound, "room not found"))
 		return
 	}
@@ -183,6 +189,7 @@ func (h *Hub) resume(c *Client, m in) {
 	for id := range r.receivers {
 		ids = append(ids, id)
 	}
+	slog.Info("room resumed", "ip", c.ip, "receivers", len(r.receivers))
 	c.send(msg(map[string]any{"t": "room_resumed", "room_id": r.id, "peers": ids}))
 }
 
@@ -196,19 +203,23 @@ func (h *Hub) join(c *Client, m in) {
 		return
 	}
 	if !h.Join.Allow(c.ip) {
+		slog.Warn("rate limited", "action", "join_room", "ip", c.ip)
 		c.send(errMsg(ErrRateLimited, "too many attempts"))
 		return
 	}
 	r := h.rooms[m.RoomID]
 	if r == nil || r.sender == nil {
+		slog.Debug("join: room not found", "ip", c.ip)
 		c.send(errMsg(ErrNotFound, "room not found"))
 		return
 	}
 	if len(r.receivers) >= MaxReceivers {
+		slog.Info("join: room full", "ip", c.ip)
 		c.send(errMsg(ErrRoomFull, "room is full"))
 		return
 	}
 	id := randHex(4)
+	slog.Info("peer joined", "ip", c.ip, "receivers", len(r.receivers)+1)
 	r.receivers[id] = c
 	c.room, c.peerID = r, id
 	c.send(msg(map[string]any{"t": "joined", "peer_id": id}))
@@ -247,10 +258,12 @@ func (h *Hub) relayRequest(c *Client, m in) {
 		return
 	}
 	if !h.Relay.Allow(c.ip) {
+		slog.Warn("rate limited", "action", "relay_request", "ip", c.ip)
 		c.send(errMsg(ErrRateLimited, "too many relay requests"))
 		return
 	}
 	t := h.Tickets.Issue()
+	slog.Debug("relay ticket issued", "ip", c.ip)
 	c.send(msg(map[string]any{"t": "relay_ticket", "peer_id": dst.peerID, "ticket": t}))
 	dst.send(msg(map[string]any{"t": "relay_ticket", "peer_id": c.peerID, "ticket": t}))
 }
@@ -270,19 +283,20 @@ func (h *Hub) leave(c *Client) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			if h.rooms[r.id] == r && r.sender == nil {
-				h.closeRoom(r)
+				h.closeRoom(r, "sender grace expired")
 			}
 		})
 		return
 	}
 	delete(r.receivers, c.peerID)
+	slog.Debug("peer left", "ip", c.ip, "receivers", len(r.receivers))
 	if r.sender != nil {
 		r.sender.send(msg(map[string]any{"t": "peer_left", "peer_id": c.peerID}))
 	}
 }
 
 // closeRoom must be called with h.mu held.
-func (h *Hub) closeRoom(r *Room) {
+func (h *Hub) closeRoom(r *Room, reason string) {
 	delete(h.rooms, r.id)
 	if r.grace != nil {
 		r.grace.Stop()
@@ -296,7 +310,7 @@ func (h *Hub) closeRoom(r *Room) {
 		rc.room = nil
 		rc.send(bye)
 	}
-	slog.Debug("room closed", "receivers", len(r.receivers))
+	slog.Info("room closed", "reason", reason, "receivers", len(r.receivers), "rooms", len(h.rooms))
 }
 
 // Stats is used by tests and health output.

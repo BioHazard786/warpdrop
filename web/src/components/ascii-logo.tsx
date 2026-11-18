@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
+import { useEffect, useRef, useState } from "react"
 
 // "ANSI Shadow" glyphs, 6 rows each. The solid layer is derived by blanking every box-drawing character.
 const GLYPHS: Record<string, string[]> = {
@@ -17,7 +17,7 @@ const SHADOW = word("WARPDROP")
 const SOLID = SHADOW.replace(/[^█\n]/g, " ")
 
 const SIZE =
-  "text-[6.5px] sm:text-[11px] md:text-[13px] tracking-[-1px] leading-[125%] font-mono whitespace-pre select-none"
+  "text-[8.5px] sm:text-[11px] md:text-[12.5px] lg:text-[14px] tracking-[-1px] leading-[125%] font-mono whitespace-pre select-none"
 
 /** Typewriter-reveal ASCII wordmark. All timers and frames are cancelled on unmount. */
 export function AsciiLogo({

@@ -1,9 +1,9 @@
+import { IconLoader2 } from "@tabler/icons-react"
 import { cn } from "cn"
-import { IconLoader } from "@tabler/icons-react"
 
 function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
   return (
-    <IconLoader
+    <IconLoader2
       data-slot="spinner"
       role="status"
       aria-label="Loading"

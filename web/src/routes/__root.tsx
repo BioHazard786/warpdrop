@@ -1,31 +1,52 @@
-import { Outlet, createRootRoute } from "@tanstack/react-router"
 import { AsciiLogo } from "@/components/ascii-logo"
-import { Header } from "@/components/header"
-import { Toaster } from "@/components/ui/sonner"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { Marker, MarkerContent } from "@/components/ui/marker"
+import { Toaster } from "@/components/ui/toast"
+import { Outlet, createRootRoute } from "@tanstack/react-router"
 
 export const Route = createRootRoute({
   component: () => (
-    <TooltipProvider>
+    <Toaster>
       <div className="flex min-h-svh flex-col">
-        <Header />
-        <main className="mx-auto w-full max-w-2xl flex-1 space-y-8 px-4 pt-4 pb-16">
-          <AsciiLogo />
-          <p className="font-mono text-xs text-muted-foreground">
-            Device to device. No upload, no account. End-to-end encrypted.
-          </p>
+        <ThemeToggle />
+        <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-4 pt-16 pb-16 sm:px-6 sm:pt-20">
+          <section className="flex flex-col gap-5">
+            <AsciiLogo />
+            <div className="flex flex-col gap-2">
+              <h1 className="font-serif text-2xl tracking-tight text-balance sm:text-3xl">
+                Files, straight from your device to theirs.
+              </h1>
+              <p className="text-base leading-relaxed text-pretty text-muted-foreground">
+                No upload, no account, no size limit. Open the link on any device, or use the CLI.
+              </p>
+            </div>
+          </section>
           <Outlet />
         </main>
+        <footer className="mx-auto w-full max-w-3xl px-4 pb-8 sm:px-6">
+          <Marker variant="separator" className="font-mono text-xs">
+            <MarkerContent>
+              warpdrop ·{" "}
+              <a href="https://github.com/BioHazard786/Warpdrop" target="_blank" rel="noreferrer">
+                open source
+              </a>
+            </MarkerContent>
+          </Marker>
+        </footer>
       </div>
-      <Toaster />
-    </TooltipProvider>
+    </Toaster>
   ),
   notFoundComponent: () => (
-    <p className="font-mono text-sm text-muted-foreground">
-      404 // nothing here.{" "}
-      <a className="underline" href="/">
+    <Empty className="flex-none border-2 border-dashed py-12">
+      <EmptyHeader>
+        <EmptyTitle className="font-pixel text-6xl leading-none">404</EmptyTitle>
+        <EmptyDescription>Nothing here.</EmptyDescription>
+      </EmptyHeader>
+      <Button variant="outline" render={<a href="/" />}>
         Send a file
-      </a>
-    </p>
+      </Button>
+    </Empty>
   ),
 })

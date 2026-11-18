@@ -34,18 +34,18 @@ To pin a release instead of `latest`, set `WARPDROP_VERSION=2.0.0` in `.env`.
 
 ### Caddy
 
-[`deploy/Caddyfile.sample`](deploy/Caddyfile.sample): replace `YOUR_DOMAIN`, reload Caddy. It gets certificates itself and handles the WebSocket upgrades on `/ws` and `/relay/` without extra settings.
+[`deploy/Caddyfile.sample`](deploy/Caddyfile.sample): already uses `drop.warplabs.info` and `install-drop.warplabs.info` (change them if you host elsewhere), then reload Caddy. It gets certificates itself and handles the WebSocket upgrades on `/ws` and `/relay/` without extra settings.
 
 ### Nginx
 
-[`deploy/nginx.conf.sample`](deploy/nginx.conf.sample): replace `YOUR_DOMAIN`, add your certificate paths (certbot works), then `nginx -t && systemctl reload nginx`. Two parts matter and must stay:
+[`deploy/nginx.conf.sample`](deploy/nginx.conf.sample): domains are `drop.warplabs.info` and `install-drop.warplabs.info` (change them if you host elsewhere), add your certificate paths (certbot works), then `nginx -t && systemctl reload nginx`. Two parts matter and must stay:
 
 - `/ws` and `/relay/` need the `Upgrade`/`Connection` headers, or signaling and the relay silently break.
 - `proxy_buffering off` on those locations, so relayed file data streams instead of piling up in Nginx.
 
 ### Anything else
 
-Proxy everything on `YOUR_DOMAIN` to `127.0.0.1:8080` with WebSocket upgrade support, set `Host` and `X-Forwarded-For`, and give relay connections a long read timeout (an hour is fine).
+Proxy everything on your domain to `127.0.0.1:8080` with WebSocket upgrade support, set `Host` and `X-Forwarded-For`, and give relay connections a long read timeout (an hour is fine).
 
 Both samples were validated with `caddy validate` / `nginx -t`, and a transfer through the Nginx sample over TLS was byte-verified.
 
@@ -61,6 +61,8 @@ All optional. Set them in `.env` (compose passes them to the container).
 | `ALLOWED_ORIGINS` | empty | Extra browser origins allowed to open `/ws`, comma separated. The site's own host is always allowed. The CLI sends no origin and is always allowed. |
 | `TRUSTED_PROXIES` | `127.0.0.1,172.16.0.0/12` | Peers whose `X-Forwarded-For` is trusted, so rate limits see the real client IP. The default covers a host proxy reaching the container through Docker's bridge. **Set this to your proxy's address if it isn't on this host.** |
 | `RATE_LIMIT_SCALE` | `1` | Multiplies the per-IP limits (below). Raise it when many people share one address. |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
+| `LOG_FORMAT` | `json` | `json` for production, `text` for plain key=value lines, `color` for tinted local output (no colors when not a terminal). |
 | `STUN_URLS` | Google STUN | STUN servers, comma separated. |
 | `TURN_URLS`, `TURN_SECRET` | empty | TURN is offered to clients only when **both** are set. |
 

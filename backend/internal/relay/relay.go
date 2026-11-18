@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -85,16 +86,19 @@ func (r *Relay) idle() time.Duration {
 func (r *Relay) Handler(w http.ResponseWriter, req *http.Request) {
 	t := req.PathValue("ticket")
 	if r.active.Load() >= int64(r.MaxConns) {
+		slog.Warn("relay busy", "max", r.MaxConns)
 		http.Error(w, "relay busy", http.StatusServiceUnavailable)
 		return
 	}
 	e, first, ok := r.claim(t)
 	if !ok {
+		slog.Debug("relay: unknown ticket", "remote", req.RemoteAddr)
 		http.Error(w, "unknown ticket", http.StatusNotFound)
 		return
 	}
 	conn, err := r.Upgrader.Upgrade(w, req, nil)
 	if err != nil {
+		slog.Debug("relay upgrade failed", "err", err)
 		return
 	}
 	conn.SetReadLimit(maxMessage)
@@ -106,8 +110,12 @@ func (r *Relay) Handler(w http.ResponseWriter, req *http.Request) {
 	defer r.active.Add(-1)
 	select {
 	case other := <-e.peer:
+		start := time.Now()
+		slog.Info("relay paired", "active", r.active.Load())
 		r.pipe(conn, other)
+		slog.Info("relay ended", "duration", time.Since(start).Round(time.Millisecond))
 	case <-time.After(TicketTTL):
+		slog.Debug("relay: peer never arrived")
 		r.drop(t)
 		_ = conn.Close()
 	case <-req.Context().Done():

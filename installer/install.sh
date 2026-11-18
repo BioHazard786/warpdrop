@@ -3,9 +3,9 @@
 #
 #          FILE: install.sh
 # 
-#         USAGE: curl https://install.warpdrop.qzz.io | bash
+#         USAGE: curl https://install-drop.warplabs.info | bash
 #                 OR
-#                wget -qO- https://install.warpdrop.qzz.io/install.sh | bash
+#                wget -qO- https://install-drop.warplabs.info/install.sh | bash
 # 
 #   DESCRIPTION: WarpDrop CLI Installer Script.
 #

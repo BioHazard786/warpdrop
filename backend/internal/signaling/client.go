@@ -1,6 +1,7 @@
 package signaling
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 
@@ -40,6 +41,7 @@ func (c *Client) send(b []byte) {
 	select {
 	case c.out <- b:
 	default:
+		slog.Warn("client too slow, dropping", "ip", c.ip)
 		c.close()
 	}
 }
@@ -53,6 +55,8 @@ func (c *Client) close() {
 
 // Serve runs the connection until it ends. It blocks, so call it from the HTTP handler.
 func (c *Client) Serve() {
+	slog.Debug("ws connected", "ip", c.ip)
+	defer slog.Debug("ws disconnected", "ip", c.ip)
 	go c.writePump()
 	c.readPump()
 }
@@ -71,10 +75,14 @@ func (c *Client) readPump() {
 	for {
 		mt, data, err := c.conn.ReadMessage()
 		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				slog.Debug("ws read ended", "ip", c.ip, "err", err)
+			}
 			return
 		}
 		if mt != websocket.TextMessage {
 			if bad++; bad >= maxBad {
+				slog.Warn("too many bad frames, closing", "ip", c.ip)
 				return
 			}
 			c.send(errMsg(ErrBadRequest, "text frames only"))
