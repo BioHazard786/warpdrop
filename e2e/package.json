@@ -1,0 +1,14 @@
+{
+  "name": "warpdrop-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^26.6.6",
+    "fflate": "^0.8.3",
+    "typescript": "^7.0.2"
+  }
+}
