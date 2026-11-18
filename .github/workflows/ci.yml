@@ -91,7 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: shellcheck install.sh
-        run: shellcheck -S warning installer/install.sh
+        run: shellcheck -S warning web/public/install.sh
       - name: compose files are valid
         run: |
           docker compose config -q

@@ -25,7 +25,6 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useCloseConfirmation } from "@/hooks/use-close-confirmation"
 import { formatBytes } from "@/lib/format"
 import { useIsSending, useSend } from "@/store/send"
-import { fetchConfig } from "@/transfer/signaling"
 import {
   IconAlertTriangle,
   IconDevices,
@@ -35,17 +34,21 @@ import {
   IconRefresh,
 } from "@tabler/icons-react"
 import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 
 export const Route = createFileRoute("/")({ component: SendPage })
 
-const CLI = {
+const cli = () => ({
+  install: {
+    cmd: `curl -fsSL ${location.origin}/install.sh | bash`,
+    hint: "Installs the warpdrop CLI. It talks to browsers too.",
+  },
   send: { cmd: "warpdrop send photos.zip", hint: "Prints a code and a link anyone can open here." },
   receive: {
     cmd: "warpdrop receive <code>",
     hint: "Takes the code from a browser tab or another terminal.",
   },
-} as const
+})
 
 function SendPage() {
   const s = useSend()
@@ -133,25 +136,9 @@ function SendPage() {
   )
 }
 
-// The install tab exists only when the server advertises an installer (INSTALL_URL).
 function Idle({ onFiles }: { onFiles: (files: File[]) => void }) {
-  const [install, setInstall] = useState("")
-  useEffect(() => {
-    fetchConfig()
-      .then((c) => setInstall(c.install ?? ""))
-      .catch(() => {})
-  }, [])
-  const tabs: Record<string, { cmd: string; hint: string }> = install
-    ? {
-        install: {
-          cmd: `curl -fsSL ${install} | bash`,
-          hint: "Installs the warpdrop CLI. It talks to browsers too.",
-        },
-        ...CLI,
-      }
-    : CLI
-  const [picked, setTab] = useState("send")
-  const tab = picked in tabs ? picked : "send"
+  const CLI = cli()
+  const [tab, setTab] = useState<keyof typeof CLI>("install")
   return (
     <div className="flex flex-col gap-10">
       <Dropzone onFiles={onFiles} />
@@ -163,10 +150,10 @@ function Idle({ onFiles }: { onFiles: (files: File[]) => void }) {
             size="sm"
             spacing={0}
             value={[tab]}
-            onValueChange={(v) => v[0] && setTab(v[0])}
+            onValueChange={(v) => v[0] && setTab(v[0] as keyof typeof CLI)}
             aria-label="Command"
           >
-            {Object.keys(tabs).map((k) => (
+            {Object.keys(CLI).map((k) => (
               <ToggleGroupItem key={k} value={k} className="font-mono text-xs">
                 {k}
               </ToggleGroupItem>
@@ -174,8 +161,8 @@ function Idle({ onFiles }: { onFiles: (files: File[]) => void }) {
           </ToggleGroup>
         }
       >
-        <CliBox command={tabs[tab].cmd} />
-        <p className="text-xs text-muted-foreground">{tabs[tab].hint}</p>
+        <CliBox command={CLI[tab].cmd} />
+        <p className="text-xs text-muted-foreground">{CLI[tab].hint}</p>
       </Section>
     </div>
   )

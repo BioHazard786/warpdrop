@@ -1,7 +1,7 @@
 # WarpDrop: one container serves the web app, signaling and the encrypted relay.
 # Put your own Caddy/Nginx in front (see deploy/); nothing here binds a public port.
 #
-#   docker compose up -d                  # app (+ installer)
+#   docker compose up -d                  # the app
 #   docker compose --profile turn up -d   # also run coturn (optional, see DEPLOY.md)
 
 services:
@@ -21,8 +21,6 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       # peers whose X-Forwarded-For is trusted: loopback plus Docker's bridge ranges, where a host proxy appears from
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1,172.16.0.0/12}
-      # where the CLI installer is served; empty hides the install command in the web UI
-      INSTALL_URL: ${INSTALL_URL:-}
       STUN_URLS: ${STUN_URLS:-stun:stun.l.google.com:19302}
       # TURN is used only when BOTH of these are set
       TURN_URLS: ${TURN_URLS:-}
@@ -30,13 +28,6 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-
-  installer:
-    image: ghcr.io/biohazard786/warpdrop-cli-installer:${WARPDROP_VERSION:-latest}
-    build: ./installer
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8000:8000"
 
   # Optional TURN relay. Needs TURN_SECRET (the same value the app uses), TURN_REALM (your domain) and
   # TURN_EXTERNAL_IP (the server's public IP). Host networking is required for the UDP relay port range.

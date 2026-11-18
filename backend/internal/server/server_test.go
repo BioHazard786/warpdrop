@@ -374,28 +374,6 @@ func TestSPAAndConfig(t *testing.T) {
 	}
 }
 
-func TestConfigInstallURL(t *testing.T) {
-	install := func(mod func(*config.Config)) string {
-		e := setup(t, mod)
-		resp, err := http.Get(e.ts.URL + "/api/config")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		var c struct{ Install string }
-		if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
-			t.Fatal(err)
-		}
-		return c.Install
-	}
-	if got := install(nil); got != "" {
-		t.Fatalf("install should be absent by default, got %q", got)
-	}
-	if got := install(func(c *config.Config) { c.InstallURL = "install.example.com" }); got != "install.example.com" {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func TestRateLimitScale(t *testing.T) {
 	create := func(e env) (ok int) {
 		for i := 0; i < 30; i++ {

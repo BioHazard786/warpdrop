@@ -21,10 +21,8 @@ type Config struct {
 	// RateScale multiplies the per-IP limits on room creation, joining and relay requests (default 1).
 	// Raise it when many users share one address (office or school NAT); lower it to be stricter.
 	RateScale float64
-	// InstallURL is where the CLI installer is served (e.g. install.example.com). Empty hides the install command in the web UI.
-	InstallURL string
-	LogLevel   string // debug|info|warn|error (default info)
-	LogFormat  string // json|text (default json)
+	LogLevel  string // debug|info|warn|error (default info)
+	LogFormat string // json|text (default json)
 }
 
 func Load() Config {
@@ -39,7 +37,6 @@ func Load() Config {
 		TURNURLs:       list(os.Getenv("TURN_URLS")),
 		TURNSecret:     os.Getenv("TURN_SECRET"),
 		RateScale:      scale(os.Getenv("RATE_LIMIT_SCALE")),
-		InstallURL:     strings.TrimSpace(os.Getenv("INSTALL_URL")),
 		LogLevel:       get("LOG_LEVEL", "info"),
 		LogFormat:      get("LOG_FORMAT", "json"),
 	}

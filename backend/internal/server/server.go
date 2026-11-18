@@ -162,10 +162,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveConfig(w http.ResponseWriter, _ *http.Request) {
-	c := struct {
-		ice.Config
-		Install string `json:"install,omitempty"`
-	}{ice.Build(s.cfg.STUNURLs, s.cfg.TURNURLs, s.cfg.TURNSecret, s.relay != nil, signaling.MaxReceivers, time.Now()), s.cfg.InstallURL}
+	c := ice.Build(s.cfg.STUNURLs, s.cfg.TURNURLs, s.cfg.TURNSecret, s.relay != nil, signaling.MaxReceivers, time.Now())
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(c); err != nil {

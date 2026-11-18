@@ -3,7 +3,7 @@
 Privacy-first, self-hostable file sharing, device to device. Like AirDrop, but for people who don't trust "The Cloud™️" or just want to feel like a hacker sending files from a terminal.
 
 - **Web**: [drop.warplabs.info](https://drop.warplabs.info)
-- **CLI**: `curl -fsSL install-drop.warplabs.info | bash`
+- **CLI**: `curl -fsSL drop.warplabs.info/install.sh | bash`
   - **Scoop (Windows)**: `scoop bucket add biohazard786 https://github.com/BioHazard786/scoop-bucket.git && scoop install biohazard786/warpdrop`
   - **Brew (macOS)**: `brew tap BioHazard786/tap && brew install --cask warpdrop`
 - **Self-hosting**: [DEPLOY.md](DEPLOY.md), one container and a reverse proxy.
@@ -70,7 +70,7 @@ v2 is **not compatible** with v1 clients or servers. Update the CLI and redeploy
 
 ```bash
 cp .env.example .env      # everything is optional
-docker compose up -d      # the app on 127.0.0.1:8080, the installer on 127.0.0.1:8000
+docker compose up -d      # the app on 127.0.0.1:8080
 ```
 
 Put your own Caddy or Nginx in front (ready-to-use samples in [`deploy/`](deploy/)). The image is a ~20 MB static binary with the web app embedded, runs as a non-root user, and needs no build arguments or per-environment rebuilds. TURN is optional (`docker compose --profile turn up -d`); most people never need it because the built-in relay covers strict networks. Details, every setting, and troubleshooting are in [DEPLOY.md](DEPLOY.md).
@@ -85,7 +85,6 @@ web/        Vite + React 19 + TanStack Router + shadcn (Base UI) + Tailwind v4
 cli/        Go CLI (pion WebRTC)
 protocol/   PROTOCOL.md plus the fixtures both web and CLI are tested against
 e2e/        Playwright: web to web, CLI to web, relay, fault injection
-installer/  install.sh and the tiny server that serves it
 ```
 
 ```bash

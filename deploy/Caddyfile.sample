@@ -1,8 +1,8 @@
-# Sample Caddyfile for WarpDrop. Drop into your Caddy config. Domains: drop.warplabs.info (app) and install-drop.warplabs.info (CLI installer).
+# Sample Caddyfile for WarpDrop. Drop into your Caddy config. Replace drop.warplabs.info with your domain.
 # Caddy gets HTTPS from Let's Encrypt automatically, and reverse_proxy handles the WebSocket upgrades on
 # /ws and /relay/ with no extra settings. Ports 80 and 443 must be open and the A record must point here.
 
-# The app: web UI, /ws signaling, /relay/ encrypted relay and /api/config, all from one upstream.
+# The app: web UI, /ws signaling, /relay/ encrypted relay, /api/config and /install.sh, all from one upstream.
 drop.warplabs.info {
 	reverse_proxy 127.0.0.1:8080 {
 		# relayed transfers can pause for a while (a user deciding); don't cut idle upstream connections early
@@ -11,9 +11,4 @@ drop.warplabs.info {
 			write_timeout 1h
 		}
 	}
-}
-
-# The curl | bash installer endpoint
-install-drop.warplabs.info {
-	reverse_proxy 127.0.0.1:8000
 }

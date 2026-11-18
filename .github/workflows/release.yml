@@ -23,8 +23,6 @@ jobs:
         include:
           - name: warpdrop
             context: .
-          - name: warpdrop-cli-installer
-            context: ./installer
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
