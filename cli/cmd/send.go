@@ -12,6 +12,7 @@ import (
 	"github.com/BioHazard786/Warpdrop/cli/internal/transfer"
 	"github.com/BioHazard786/Warpdrop/cli/internal/ui"
 	"github.com/BioHazard786/Warpdrop/cli/internal/utils"
+	"github.com/BioHazard786/Warpdrop/cli/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +38,7 @@ func deviceName() string {
 	if err != nil || h == "" {
 		h = "terminal"
 	}
-	return protocol.DisplayName(h) + " (CLI)"
+	return protocol.DisplayName(h) + " (CLI " + version.Version + ")"
 }
 
 func runSend(ctx context.Context, paths []string) error {
@@ -107,6 +108,8 @@ func runSend(ctx context.Context, paths []string) error {
 			switch v.Status {
 			case "authenticating":
 				ui.PrintInfof("%s connected (%s), verifying...", v.Device, via)
+			case "waiting":
+				ui.PrintInfof("Waiting for %s to accept...", v.Device)
 			case "done":
 				delivered = true
 				ui.PrintSuccessf("Delivered %d file(s), %s, to %s", len(srcs), utils.FormatSize(v.Total), v.Device)

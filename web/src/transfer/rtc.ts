@@ -55,8 +55,14 @@ export class RtcTransport implements Transport {
   }
   send(frame: Wire) {
     if (this.closed || this.dc.readyState !== "open") return
-    if (typeof frame === "string") this.dc.send(frame)
-    else this.dc.send(frame as Uint8Array<ArrayBuffer>)
+    try {
+      if (typeof frame === "string") this.dc.send(frame)
+      else this.dc.send(frame as Uint8Array<ArrayBuffer>)
+    } catch {
+      // e.g. Chrome's "send queue is full" (16 MiB): the frame is lost, so end the link and let the session resume
+      // instead of throwing into callers that would then hang
+      this.shutdown()
+    }
   }
   drain() {
     return new Promise<void>((resolve) => {

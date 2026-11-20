@@ -5,7 +5,8 @@ export const MiB = 1024 * 1024
 export const CHUNK_SIZE = 256 * 1024
 export const ACK_EVERY = 4 * MiB
 export const MAX_UNACKED = 32 * MiB
-export const HIGH_WATER = 16 * MiB
+// Chrome throws "send queue is full" once an RTCDataChannel would queue more than 16 MiB: stay well under it
+export const HIGH_WATER = 8 * MiB
 export const LOW_WATER = 4 * MiB
 export const MAX_FILES = 10_000
 export const MAX_NAME_BYTES = 255

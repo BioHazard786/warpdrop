@@ -24,7 +24,7 @@ type PeerView struct {
 	ID        string
 	Device    string
 	Transport string // "", "rtc" or "relay"
-	Status    string // connecting | authenticating | sending | done | failed
+	Status    string // connecting | authenticating | waiting | sending | done | failed
 	Reason    string
 	Sent      int64
 	Total     int64
@@ -372,15 +372,14 @@ func (l *link) attach(t protocol.Transport, from *protocol.RTCPeer) {
 	}
 	l.update(func(v *PeerView) { v.Transport, v.Status = kind, "authenticating" })
 
-	l.r.sessions.Add(1)
-	go func() {
-		defer l.r.sessions.Done()
+	l.r.sessions.Go(func() {
 		res := protocol.RunSender(l.r.ctx, t, protocol.SenderOptions{
 			RoomID: l.r.roomID, Secret: l.r.secret, Device: l.r.device, Files: l.r.files,
 			OnProgress: func(idx int, b int64) {
 				l.update(func(v *PeerView) { v.Sent, v.Status = l.r.prefix[idx]+b, "sending" })
 			},
 			OnFileDone: func(int) { l.update(func(v *PeerView) { v.FilesDone++ }) },
+			OnOffered:  func() { l.update(func(v *PeerView) { v.Status = "waiting" }) },
 		})
 		l.mu.Lock()
 		stale, gone := l.gen != gen || l.closed, l.gone
@@ -404,7 +403,7 @@ func (l *link) attach(t protocol.Transport, from *protocol.RTCPeer) {
 			why := reasonText[res.Reason]
 			l.update(func(v *PeerView) { v.Status, v.Reason = "failed", why })
 		}
-	}()
+	})
 }
 
 // onSignalingLeft: the receiver's signaling socket is gone. A live session must outlive that.

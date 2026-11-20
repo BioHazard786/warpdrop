@@ -256,7 +256,7 @@ func SenderStep(st SState, ev SEvent) (SState, []SEffect) {
 	if a, ok := ev.Frame.(Ack); ok && ev.K == SEvFrame {
 		// only meaningful for the file in flight; stale or absurd acks are ignored
 		if st.S == SSending && a.ID == st.Files[st.Idx].ID && a.Bytes <= st.Files[st.Idx].Size {
-			return st, []SEffect{{K: SFxAck, ID: a.ID, Bytes: a.Bytes}}
+			return st, []SEffect{{K: SFxAck, Idx: st.Idx, ID: a.ID, Bytes: a.Bytes}}
 		}
 		return st, nil
 	}

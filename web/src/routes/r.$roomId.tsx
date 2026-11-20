@@ -1,17 +1,8 @@
-import {
-  IconAlertTriangle,
-  IconCheck,
-  IconCircleDashed,
-  IconDownload,
-  IconInfoCircle,
-} from "@tabler/icons-react"
-import { Link, createFileRoute } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
 import { FileList } from "@/components/file-list"
 import { Section } from "@/components/section"
 import { TransportBadge } from "@/components/transport-badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -25,6 +16,15 @@ import { cn } from "@/lib/utils"
 import { useReceive } from "@/store/receive"
 import { downloadMode } from "@/transfer/download"
 import { isValidSecret } from "@/transfer/words"
+import {
+  IconAlertTriangle,
+  IconCheck,
+  IconCircleDashed,
+  IconDownload,
+  IconInfoCircle,
+} from "@tabler/icons-react"
+import { Link, createFileRoute } from "@tanstack/react-router"
+import { useEffect, useState } from "react"
 
 export const Route = createFileRoute("/r/$roomId")({ component: ReceivePage })
 
@@ -75,9 +75,9 @@ function ReceivePage() {
               Try different words
             </Button>
           )}
-          <Button variant="outline" render={<Link to="/" />}>
+          <Link to="/" className={buttonVariants({ variant: "outline" })}>
             Send files instead
-          </Button>
+          </Link>
         </div>
       </Empty>
     )
@@ -98,9 +98,9 @@ function ReceivePage() {
             {r.files.length > 1 && " Saved as one zip."}
           </EmptyDescription>
         </EmptyHeader>
-        <Button variant="outline" render={<Link to="/" />}>
+        <Link to="/" className={buttonVariants({ variant: "outline" })}>
           Send files
-        </Button>
+        </Link>
       </Empty>
     )
   }
@@ -228,7 +228,7 @@ function ReceivePage() {
           </Button>
         </div>
       ) : (
-        <Button variant="outline" className="self-start" onClick={r.cancel}>
+        <Button variant="destructive" className="self-start" onClick={r.cancel}>
           Cancel
         </Button>
       )}

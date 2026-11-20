@@ -156,6 +156,7 @@ type SenderOptions struct {
 	Files                  []Source
 	OnProgress             func(idx int, bytes int64)
 	OnFileDone             func(idx int)
+	OnOffered              func() // handshake passed and the file list is out: the receiver decides now
 }
 
 type sender struct {
@@ -187,6 +188,9 @@ func RunSender(ctx context.Context, t Transport, o SenderOptions) Result {
 		return r
 	}
 	_ = t.SendText(manifest)
+	if o.OnOffered != nil {
+		o.OnOffered()
+	}
 
 	s := &sender{t: t, o: o, ackCh: make(chan struct{}, 1), events: make(chan SEvent, 16)}
 	rctx, cancel := context.WithCancel(ctx)
@@ -264,11 +268,13 @@ func (s *sender) apply(ctx context.Context, e SEffect) *Result {
 		}()
 	case SFxAck:
 		s.acked.Store(max(s.acked.Load(), e.Bytes))
+		s.progress(e.Idx, s.acked.Load()) // receiver-confirmed bytes, not what sits in our send buffer
 		select {
 		case s.ackCh <- struct{}{}:
 		default:
 		}
 	case SFxFileAcked:
+		s.progress(e.Idx, s.o.Files[e.Idx].Entry.Size)
 		if s.o.OnFileDone != nil {
 			s.o.OnFileDone(e.Idx)
 		}
@@ -284,6 +290,12 @@ func (s *sender) apply(ctx context.Context, e SEffect) *Result {
 		return &r
 	}
 	return nil
+}
+
+func (s *sender) progress(idx int, bytes int64) {
+	if s.o.OnProgress != nil {
+		s.o.OnProgress(idx, bytes)
+	}
 }
 
 func (s *sender) streamFile(ctx context.Context, idx int, offset int64) {
@@ -305,6 +317,7 @@ func (s *sender) streamFile(ctx context.Context, idx int, offset int64) {
 	if s.t.SendText(Encode(NewFileStart(src.Entry.ID, offset))) != nil {
 		return
 	}
+	s.progress(idx, offset)
 	chunk := chunkSizeFor(s.t)
 	sr := io.NewSectionReader(src.R, offset, size-offset)
 	sent := offset
@@ -344,9 +357,6 @@ func (s *sender) streamFile(ctx context.Context, idx int, offset int64) {
 		}
 		h.Write(buf)
 		sent += int64(len(buf))
-		if s.o.OnProgress != nil {
-			s.o.OnProgress(idx, sent)
-		}
 	}
 	// Post "streamed" BEFORE sending file_end. The receiver can only answer file_done after it has file_end, and the
 	// reader goroutine posts into the same ordered channel, so this guarantees the machine sees streamed first.

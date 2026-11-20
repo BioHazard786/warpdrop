@@ -7,6 +7,7 @@ describe("format", () => {
     expect(formatBytes(-5)).toBe("0 B")
     expect(formatBytes(Number.NaN)).toBe("0 B")
     expect(formatBytes(1023)).toBe("1023 B")
+    expect(formatBytes(4.152156325334297)).toBe("4 B")
     expect(formatBytes(1536)).toBe("1.5 KB")
     expect(formatBytes(5 * 1024 ** 3)).toBe("5.0 GB")
     expect(formatBytes(1e30)).toMatch(/PB$/)
@@ -27,5 +28,13 @@ describe("format", () => {
     expect(m.eta(2_000_000)).toBeCloseTo(2)
     m.sample(10, 3000) // went backwards: restart the window, keep last speed
     expect(m.speed).toBeCloseTo(1_000_000)
+  })
+  it("drops to 0 on a stall instead of decaying toward absurd ETAs", () => {
+    const m = new SpeedMeter()
+    m.sample(0, 1000)
+    m.sample(1_000_000, 2000)
+    expect(m.sample(1_000_000, 2500)).toBeCloseTo(1_000_000) // brief gap: hold
+    expect(m.sample(1_000_000, 4500)).toBe(0)
+    expect(m.eta(1_000_000)).toBe(0) // rendered as "--"
   })
 })

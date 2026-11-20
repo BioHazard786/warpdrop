@@ -11,7 +11,7 @@ export interface PeerView {
   id: string
   device: string
   transport: "rtc" | "relay" | null
-  status: "connecting" | "authenticating" | "sending" | "done" | "failed"
+  status: "connecting" | "authenticating" | "waiting" | "sending" | "done" | "failed"
   /** Why it failed, human readable. */
   reason?: string
   /** Bytes delivered so far, across all files. */
@@ -301,6 +301,7 @@ class PeerLink {
       onProgress: (idx, bytes) =>
         this.update({ sent: this.room.offsetOf(idx) + bytes, status: "sending" }),
       onFileDone: () => this.update({ filesDone: this.view.filesDone + 1 }),
+      onOffered: () => this.update({ status: "waiting" }),
     })
     this.session = session
     this.unregister = registerTransport(() => t.close())

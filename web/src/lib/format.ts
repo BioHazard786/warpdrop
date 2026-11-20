@@ -5,7 +5,7 @@ export function formatBytes(bytes: number, digits = 1): string {
   if (!Number.isFinite(bytes) || bytes < 1) return "0 B"
   const i = Math.min(UNITS.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
   const v = bytes / 1024 ** i
-  return `${i === 0 ? v : v.toFixed(v >= 100 ? 0 : digits)} ${UNITS[i]}`
+  return `${i === 0 ? Math.round(v) : v.toFixed(v >= 100 ? 0 : digits)} ${UNITS[i]}`
 }
 
 export const formatSpeed = (bps: number) => `${formatBytes(bps)}/s`
@@ -30,6 +30,11 @@ export class SpeedMeter {
     }
     const dt = (now - this.t) / 1000
     if (dt < 0.2) return this.speed
+    if (bytes === this.bytes) {
+      // stalled: keep the window open so the next reading averages over the gap; after 2 s report 0, not a decaying crawl
+      if (dt > 2) this.speed = 0
+      return this.speed
+    }
     const inst = (bytes - this.bytes) / dt
     this.speed = this.speed === 0 ? inst : this.speed * 0.7 + inst * 0.3
     this.t = now

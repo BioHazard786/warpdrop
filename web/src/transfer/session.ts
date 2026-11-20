@@ -181,11 +181,14 @@ export interface SenderOptions {
   files: FileSource[]
   onProgress?: (idx: number, bytes: number) => void
   onFileDone?: (idx: number) => void
+  /** The handshake passed and the file list is out: now it's up to the receiver to accept. */
+  onOffered?: () => void
 }
 
 export class SenderSession {
   private abort = new AbortController()
   private acked = 0
+  private idx = 0 // file being streamed, for progress reports
   private ackWaiters: (() => void)[] = []
   private resolve!: (r: Result) => void
   private state: SState
@@ -223,6 +226,7 @@ export class SenderSession {
       return this.result
     }
     this.t.send(manifest)
+    this.o.onOffered?.()
     inbox.setHandler((w) => {
       if (w === null) return this.dispatch({ e: "closed" })
       if (typeof w !== "string") return this.dispatch({ e: "bad" })
@@ -254,9 +258,11 @@ export class SenderSession {
         break
       case "ack":
         this.acked = Math.max(this.acked, fx.bytes)
+        this.o.onProgress?.(this.idx, this.acked) // receiver-confirmed bytes, not what sits in our send buffer
         for (const w of this.ackWaiters.splice(0)) w()
         break
       case "file_acked":
+        this.o.onProgress?.(fx.idx, this.o.files[fx.idx]!.size)
         this.o.onFileDone?.(fx.idx)
         break
       case "complete":
@@ -278,10 +284,12 @@ export class SenderSession {
     const signal = this.abort.signal
     const hasher = await createXXHash64()
     hasher.init()
+    this.idx = idx
     this.acked = offset
     try {
       if (offset > 0) await this.rehash(file, offset, hasher, signal)
       this.t.send(encodeFrame({ t: "file_start", id: file.id, offset }))
+      this.o.onProgress?.(idx, offset)
       const size = chunkSizeFor(this.t)
       let sent = offset
       const reader = file.stream(offset).getReader()
@@ -308,7 +316,6 @@ export class SenderSession {
             this.t.send(part)
             hasher.update(part)
             sent += part.length
-            this.o.onProgress?.(idx, sent)
           }
         }
       } finally {

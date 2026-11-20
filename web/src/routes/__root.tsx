@@ -1,6 +1,6 @@
 import { AsciiLogo } from "@/components/ascii-logo"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { Button } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Marker, MarkerContent } from "@/components/ui/marker"
 import { Toaster } from "@/components/ui/toast"
@@ -44,9 +44,9 @@ export const Route = createRootRoute({
         <EmptyTitle className="font-pixel text-6xl leading-none">404</EmptyTitle>
         <EmptyDescription>Nothing here.</EmptyDescription>
       </EmptyHeader>
-      <Button variant="outline" render={<a href="/" />}>
+      <a href="/" className={buttonVariants({ variant: "outline" })}>
         Send a file
-      </Button>
+      </a>
     </Empty>
   ),
 })

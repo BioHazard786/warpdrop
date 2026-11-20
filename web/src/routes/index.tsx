@@ -29,8 +29,8 @@ import {
   IconAlertTriangle,
   IconDevices,
   IconLock,
-  IconPlus,
   IconPlayerStop,
+  IconPlus,
   IconRefresh,
 } from "@tabler/icons-react"
 import { createFileRoute } from "@tanstack/react-router"
@@ -259,7 +259,7 @@ function StopButton({ onStop }: { onStop: () => void }) {
     )
   return (
     <AlertDialog>
-      <AlertDialogTrigger render={<Button variant="outline" className="self-start" />}>
+      <AlertDialogTrigger render={<Button variant="destructive" className="self-start" />}>
         {label}
       </AlertDialogTrigger>
       <AlertDialogContent>

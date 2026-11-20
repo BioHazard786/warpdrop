@@ -19,6 +19,7 @@ import type { PeerRow as Peer } from "@/store/send"
 const LABEL: Record<Peer["status"], string> = {
   connecting: "Connecting",
   authenticating: "Verifying",
+  waiting: "Waiting",
   sending: "Sending",
   done: "Delivered",
   failed: "Failed",
@@ -31,8 +32,8 @@ export function PeerRow({ peer, onCancel }: { peer: Peer; onCancel: () => void }
       ? 100
       : 0
   const busy = peer.status === "connecting" || peer.status === "authenticating"
-  const live = busy || peer.status === "sending"
-  const DeviceIcon = /android|iphone|ipad|mobile/i.test(peer.device)
+  const live = busy || peer.status === "waiting" || peer.status === "sending"
+  const DeviceIcon = /android|ios|ipad|mobile/i.test(peer.device)
     ? IconDeviceMobile
     : IconDeviceDesktop
   return (
@@ -50,6 +51,8 @@ export function PeerRow({ peer, onCancel }: { peer: Peer; onCancel: () => void }
               {formatBytes(peer.sent)} / {formatBytes(peer.total)} · {formatSpeed(peer.speed)} ·{" "}
               {formatETA(peer.eta)}
             </>
+          ) : peer.status === "waiting" ? (
+            <span className="shimmer">Waiting for them to accept</span>
           ) : peer.status === "done" ? (
             <>
               {formatBytes(peer.total)} · {peer.filesDone} {peer.filesDone === 1 ? "file" : "files"}
