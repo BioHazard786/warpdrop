@@ -64,10 +64,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
-      - name: The tag must match the VERSION file
-        run: '[ "${GITHUB_REF_NAME#v}" = "$(cat VERSION)" ] || { echo "::error::tag $GITHUB_REF_NAME does not match VERSION $(cat VERSION)"; exit 1; }'
         with:
           fetch-depth: 0 # goreleaser builds the changelog from history
+      - name: The tag must match the VERSION file
+        run: '[ "${GITHUB_REF_NAME#v}" = "$(cat VERSION)" ] || { echo "::error::tag $GITHUB_REF_NAME does not match VERSION $(cat VERSION)"; exit 1; }'
       - uses: actions/setup-go@v7
         with:
           go-version-file: cli/go.mod
