@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +41,9 @@ type Room struct {
 	sender    *Client
 	receivers map[string]*Client
 	grace     *time.Timer
+	// gated rooms (created with nearby:true) only admit receivers holding a ticket from nearby_invite.
+	gated   bool
+	tickets map[string]string // gated rooms: invite ticket -> lobby id of the device it was sent to
 }
 
 type Hub struct {
@@ -48,9 +52,12 @@ type Hub struct {
 	Create  *ratelimit.IP
 	Join    *ratelimit.IP
 	Relay   *ratelimit.IP
+	Invite  *ratelimit.IP
+	Lobby   *ratelimit.IP // nearby_join: every open tab joins, so it must not eat the room-join budget
 
-	mu    sync.Mutex
-	rooms map[string]*Room
+	mu      sync.Mutex
+	rooms   map[string]*Room
+	lobbies map[string]map[string]*Client // network key -> peer id -> client
 }
 
 func NewHub(t Tickets) *Hub {
@@ -60,7 +67,10 @@ func NewHub(t Tickets) *Hub {
 		Create:  ratelimit.NewIP(10, 5),
 		Join:    ratelimit.NewIP(30, 10),
 		Relay:   ratelimit.NewIP(30, 10),
+		Invite:  ratelimit.NewIP(30, 10),
+		Lobby:   ratelimit.NewIP(60, 20),
 		rooms:   map[string]*Room{},
+		lobbies: map[string]map[string]*Client{},
 	}
 }
 
@@ -72,6 +82,11 @@ type in struct {
 	Token   string          `json:"token"`
 	To      string          `json:"to"`
 	Payload json.RawMessage `json:"payload"`
+	Nearby  bool            `json:"nearby"` // create_room: only invited receivers may join
+	Ticket  string          `json:"ticket"` // join_room: from nearby_invite
+	Device  string          `json:"device"` // nearby_join: the label shown to others
+	Hidden  bool            `json:"hidden"` // nearby_join: see the list and send, but stay out of everyone else's list
+	Reason  string          `json:"reason"` // nearby_decline: "declined" or "busy"
 }
 
 func msg(v map[string]any) []byte {
@@ -97,6 +112,10 @@ func (h *Hub) handle(c *Client, raw []byte) {
 		c.send(errMsg(ErrBadRequest, "malformed message"))
 		return
 	}
+	if strings.HasPrefix(m.T, "nearby_") != c.LobbyOnly {
+		c.send(errMsg(ErrBadRequest, "wrong kind of connection for this message"))
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	switch m.T {
@@ -110,6 +129,14 @@ func (h *Hub) handle(c *Client, raw []byte) {
 		h.signal(c, m)
 	case "relay_request":
 		h.relayRequest(c, m)
+	case "nearby_join":
+		h.nearbyJoin(c, m)
+	case "nearby_leave":
+		h.nearbyLeave(c)
+	case "nearby_invite":
+		h.nearbyInvite(c, m)
+	case "nearby_decline":
+		h.nearbyDecline(c, m)
 	case "close_room":
 		if c.room != nil && c.room.sender == c {
 			h.closeRoom(c.room, "sender closed")
@@ -140,7 +167,7 @@ func (h *Hub) create(c *Client, m in) {
 		c.send(errMsg(ErrRateLimited, "server busy"))
 		return
 	}
-	r := &Room{id: id, token: randHex(16), sender: c, receivers: map[string]*Client{}}
+	r := &Room{id: id, token: randHex(16), sender: c, receivers: map[string]*Client{}, gated: m.Nearby, tickets: map[string]string{}}
 	h.rooms[id] = r
 	c.room, c.peerID = r, "sender"
 	slog.Info("room created", "ip", c.ip, "rooms", len(h.rooms))
@@ -213,17 +240,35 @@ func (h *Hub) join(c *Client, m in) {
 		c.send(errMsg(ErrNotFound, "room not found"))
 		return
 	}
+	invited, ok := r.tickets[m.Ticket]
+	if r.gated && !ok { // unknown or already used: same answer as a missing room
+		slog.Debug("join: bad ticket", "ip", c.ip)
+		c.send(errMsg(ErrNotFound, "room not found"))
+		return
+	}
 	if len(r.receivers) >= MaxReceivers {
 		slog.Info("join: room full", "ip", c.ip)
 		c.send(errMsg(ErrRoomFull, "room is full"))
 		return
 	}
+	delete(r.tickets, m.Ticket)
+	joined := map[string]any{"t": "joined"}
+	if r.gated { // a fresh ticket so this receiver can rejoin after its signaling socket drops
+		again := randHex(8)
+		r.tickets[again] = invited
+		joined["ticket"] = again
+	}
 	id := randHex(4)
 	slog.Info("peer joined", "ip", c.ip, "receivers", len(r.receivers)+1)
 	r.receivers[id] = c
 	c.room, c.peerID = r, id
-	c.send(msg(map[string]any{"t": "joined", "peer_id": id}))
-	r.sender.send(msg(map[string]any{"t": "peer_joined", "peer_id": id, "client": m.Client}))
+	joined["peer_id"] = id
+	c.send(msg(joined))
+	joinedMsg := map[string]any{"t": "peer_joined", "peer_id": id, "client": m.Client}
+	if r.gated { // which invite this is, so a sender that invited several devices can tell them apart
+		joinedMsg["invited"] = invited
+	}
+	r.sender.send(msg(joinedMsg))
 }
 
 // peer resolves the destination of a message from c: a receiver always talks to the sender.
@@ -272,6 +317,7 @@ func (h *Hub) relayRequest(c *Client, m in) {
 func (h *Hub) leave(c *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.nearbyLeave(c)
 	r := c.room
 	if r == nil {
 		return

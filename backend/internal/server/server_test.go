@@ -396,3 +396,60 @@ func TestRateLimitScale(t *testing.T) {
 		t.Fatalf("RATE_LIMIT_SCALE=10 should lift the limit (burst 50), got %d of 30", scaled)
 	}
 }
+
+func TestAssetLinks(t *testing.T) {
+	off := setup(t, nil)
+	resp, err := http.Get(off.ts.URL + "/.well-known/assetlinks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("without a configured certificate the file must 404, got %d", resp.StatusCode)
+	}
+
+	on := setup(t, func(c *config.Config) {
+		c.AndroidPackage = "info.warplabs.warpdrop"
+		c.AndroidCertSHA256 = []string{"AA:BB"}
+	})
+	resp, err = http.Get(on.ts.URL + "/.well-known/assetlinks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var got []struct {
+		Relation []string `json:"relation"`
+		Target   struct {
+			Namespace string   `json:"namespace"`
+			Package   string   `json:"package_name"`
+			Certs     []string `json:"sha256_cert_fingerprints"`
+		} `json:"target"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || len(got) != 1 {
+		t.Fatalf("bad body: %v %v", got, err)
+	}
+	if got[0].Target.Package != "info.warplabs.warpdrop" || got[0].Target.Certs[0] != "AA:BB" || got[0].Target.Namespace != "android_app" {
+		t.Fatalf("unexpected target %+v", got[0].Target)
+	}
+}
+
+// Idle lobby sockets (one per open tab) must not use up the cap that transfers need.
+func TestLobbyConnectionsHaveTheirOwnPool(t *testing.T) {
+	e := setup(t, func(c *config.Config) { c.RateScale = 100 })
+	for i := 0; i < maxConnsPerIP; i++ {
+		e.dial(t) // fill the transfer pool
+	}
+	if _, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(e.ts.URL, "http")+"/ws", nil); err == nil || resp == nil || resp.StatusCode != 429 {
+		t.Fatalf("the transfer pool should be full (err=%v)", err)
+	}
+	lobby, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(e.ts.URL, "http")+"/ws?lobby=1", nil)
+	if err != nil {
+		t.Fatalf("a lobby socket must still connect while the transfer pool is full: %v", err)
+	}
+	defer lobby.Close()
+	c := &conn{t, lobby}
+	c.send(map[string]any{"t": "nearby_join", "v": 2, "device": "Laptop"})
+	c.want("nearby_joined")
+	c.send(map[string]any{"t": "create_room", "v": 2}) // and it cannot be used to dodge the transfer cap
+	c.wantErr("bad_request")
+}

@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/rtcp",
+  "name": "github.com/pion/rtcp",
+  "artifactVersion": "1.2.20",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/rtcp",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_rtcp"
+  ]
+}

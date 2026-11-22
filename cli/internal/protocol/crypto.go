@@ -87,6 +87,21 @@ func MAC(authKey []byte, label string, transcript []byte) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
+// Commit is hex(SHA256(pub)): a nearby sender sends it before it learns the receiver's key.
+func Commit(pub []byte) string {
+	h := sha256.Sum256(pub)
+	return hex.EncodeToString(h[:])
+}
+
+// SAS is the 6-digit code both screens show in nearby mode. It binds both public keys (via the transcript), so a
+// man-in-the-middle ends up with two different codes; the sender's commit stops it grinding for a matching pair.
+func SAS(authKey, transcript []byte) string {
+	m := hmac.New(sha256.New, authKey)
+	m.Write([]byte("sas"))
+	m.Write(transcript)
+	return fmt.Sprintf("%06d", binary.BigEndian.Uint32(m.Sum(nil)[:4])%1_000_000)
+}
+
 // VerifyMAC compares in constant time.
 func VerifyMAC(authKey []byte, label string, transcript []byte, macHex string) bool {
 	want, err := hex.DecodeString(MAC(authKey, label, transcript))
@@ -135,8 +150,10 @@ func (c *FrameCipher) nonce() []byte {
 func (c *FrameCipher) Seal(kind byte, payload []byte) []byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	pt := append([]byte{kind}, payload...)
-	out := c.aead.Seal(nil, c.nonce(), pt, nil)
+	pt := make([]byte, 1+len(payload), 1+len(payload)+c.aead.Overhead()) // room for the tag: sealed in place
+	pt[0] = kind
+	copy(pt[1:], payload)
+	out := c.aead.Seal(pt[:0], c.nonce(), pt, nil)
 	c.counter++
 	return out
 }
@@ -146,7 +163,7 @@ var ErrDecrypt = errors.New("relay frame failed authentication")
 func (c *FrameCipher) Open(wire []byte) (kind byte, payload []byte, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	pt, err := c.aead.Open(nil, c.nonce(), wire, nil)
+	pt, err := c.aead.Open(wire[:0], c.nonce(), wire, nil) // in place: wire is ours, the transports hand over fresh buffers
 	if err != nil {
 		return 0, nil, ErrDecrypt
 	}

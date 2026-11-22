@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/stun/v4",
+  "name": "github.com/pion/stun/v4",
+  "artifactVersion": "4.0.1",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/stun/v4",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_stun_v4"
+  ]
+}

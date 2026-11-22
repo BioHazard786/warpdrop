@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/mdns/v2",
+  "name": "github.com/pion/mdns/v2",
+  "artifactVersion": "2.2.2",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/mdns/v2",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_mdns_v2"
+  ]
+}

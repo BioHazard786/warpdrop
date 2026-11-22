@@ -144,7 +144,7 @@ test.describe("failures and recovery", () => {
     const share = await startSend(sender, [file("no.bin", 4000)])
     const rx = await openReceiver(await browser.newContext(), share.link)
     await rx.getByRole("button", { name: "Decline" }).click()
-    await expect(rx.getByText("Transfer failed")).toBeVisible()
+    await expect(rx.getByText("You declined the files")).toBeVisible()
     await expect(sender.getByText("Receiver declined")).toBeVisible()
   })
 })

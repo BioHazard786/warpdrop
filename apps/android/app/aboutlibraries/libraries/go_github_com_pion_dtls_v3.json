@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/dtls/v3",
+  "name": "github.com/pion/dtls/v3",
+  "artifactVersion": "3.1.15",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/dtls/v3",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_dtls_v3"
+  ]
+}

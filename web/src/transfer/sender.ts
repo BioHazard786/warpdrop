@@ -18,6 +18,10 @@ export interface PeerView {
   sent: number
   total: number
   filesDone: number
+  /** Nearby transfers only: the 6-digit code the receiver's screen must show too. */
+  sas?: string
+  /** Nearby only: the lobby id of the device whose invite this receiver used. */
+  invited?: string
 }
 
 export type SenderEvent =
@@ -29,6 +33,7 @@ export type SenderEvent =
     }
   | { t: "peer"; peer: PeerView }
   | { t: "peer_removed"; id: string }
+  | { t: "declined"; deviceId: string; reason: "declined" | "busy" }
 
 const MAX_AUTH_FAILURES = 3
 const FALLBACK_CONFIG: AppConfig = {
@@ -66,14 +71,27 @@ export class SenderRoom {
   private links = new Map<string, PeerLink>()
   private roomId = ""
   private token = ""
-  private secret = generateSecret()
+  private secret: string
+  private nearby: boolean
+  private invites: ((roomId: string, token: string) => boolean)[] = [] // queued until the room exists
   private authFailures = 0
   private stopped = false
   config: AppConfig = FALLBACK_CONFIG
 
-  constructor(files: File[], emit: (e: SenderEvent) => void) {
+  /**
+   * `nearby`: there is no share code (empty secret) and the room only admits devices invited through `invite`.
+   */
+  constructor(files: File[], emit: (e: SenderEvent) => void, nearby = false) {
     this.load(files)
     this.emit = emit
+    this.nearby = nearby
+    this.secret = nearby ? "" : generateSecret()
+  }
+
+  /** Nearby: `send` delivers an invitation for this room (now, or once the room exists). It returns false if it couldn't. */
+  invite(send: (roomId: string, token: string) => boolean) {
+    if (this.roomId) send(this.roomId, this.token)
+    else this.invites.push(send)
   }
 
   private load(files: File[]) {
@@ -121,7 +139,13 @@ export class SenderRoom {
       onOpen: (reconnect) => {
         if (reconnect && this.roomId)
           this.sig!.send({ t: "resume_room", room_id: this.roomId, token: this.token })
-        else this.sig!.send({ t: "create_room", v: 2, client: { device: deviceName() } })
+        else
+          this.sig!.send({
+            t: "create_room",
+            v: 2,
+            nearby: this.nearby,
+            client: { device: deviceName() },
+          })
       },
       onStatus: (s) => {
         if (this.stopped) return
@@ -144,6 +168,10 @@ export class SenderRoom {
         this.token = m.token
         this.emit({ t: "room", roomId: m.room_id, secret: this.secret })
         this.emit({ t: "status", status: "ready" })
+        for (const send of this.invites.splice(0)) send(m.room_id, m.token)
+        break
+      case "invite_declined":
+        this.emit({ t: "declined", deviceId: m.peer_id, reason: m.reason })
         break
       case "room_resumed":
         this.emit({ t: "status", status: "ready" })
@@ -154,7 +182,7 @@ export class SenderRoom {
             ? (m.client as { device: string }).device
             : "Receiver"
         this.links.get(m.peer_id)?.dispose()
-        const link = new PeerLink(this, m.peer_id, device.slice(0, 64))
+        const link = new PeerLink(this, m.peer_id, device.slice(0, 64), m.invited)
         this.links.set(m.peer_id, link)
         link.startRtc()
         break
@@ -237,12 +265,13 @@ class PeerLink {
   private disposed = false
   private view: PeerView
 
-  constructor(room: SenderRoom, id: string, device: string) {
+  constructor(room: SenderRoom, id: string, device: string, invited?: string) {
     this.room = room
     this.id = id
     this.view = {
       id,
       device,
+      invited,
       transport: null,
       status: "connecting",
       sent: 0,
@@ -302,6 +331,7 @@ class PeerLink {
         this.update({ sent: this.room.offsetOf(idx) + bytes, status: "sending" }),
       onFileDone: () => this.update({ filesDone: this.view.filesDone + 1 }),
       onOffered: () => this.update({ status: "waiting" }),
+      onSas: (sas) => this.update({ sas }),
     })
     this.session = session
     this.unregister = registerTransport(() => t.close())

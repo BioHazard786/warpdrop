@@ -21,24 +21,30 @@ type Config struct {
 	// RateScale multiplies the per-IP limits on room creation, joining and relay requests (default 1).
 	// Raise it when many users share one address (office or school NAT); lower it to be stricter.
 	RateScale float64
-	LogLevel  string // debug|info|warn|error (default info)
-	LogFormat string // json|text (default json)
+	// AndroidCertSHA256 are the signing-certificate fingerprints of the Android app, served at
+	// /.well-known/assetlinks.json so share links open the app. Empty = the file is not served.
+	AndroidPackage    string
+	AndroidCertSHA256 []string
+	LogLevel          string // debug|info|warn|error (default info)
+	LogFormat         string // json|text (default json)
 }
 
 func Load() Config {
 	return Config{
-		Port:           get("PORT", "8080"),
-		AllowedOrigins: list(os.Getenv("ALLOWED_ORIGINS")),
-		TrustedProxies: prefixes(os.Getenv("TRUSTED_PROXIES")),
-		RelayEnabled:   !strings.EqualFold(get("RELAY", "on"), "off"),
-		RelayMaxMbps:   atoi(os.Getenv("RELAY_MAX_MBPS"), 0),
-		RelayMaxConns:  atoi(os.Getenv("RELAY_MAX_CONNS"), 200),
-		STUNURLs:       listOr(os.Getenv("STUN_URLS"), "stun:stun.l.google.com:19302"),
-		TURNURLs:       list(os.Getenv("TURN_URLS")),
-		TURNSecret:     os.Getenv("TURN_SECRET"),
-		RateScale:      scale(os.Getenv("RATE_LIMIT_SCALE")),
-		LogLevel:       get("LOG_LEVEL", "info"),
-		LogFormat:      get("LOG_FORMAT", "json"),
+		Port:              get("PORT", "8080"),
+		AllowedOrigins:    list(os.Getenv("ALLOWED_ORIGINS")),
+		TrustedProxies:    prefixes(os.Getenv("TRUSTED_PROXIES")),
+		RelayEnabled:      !strings.EqualFold(get("RELAY", "on"), "off"),
+		RelayMaxMbps:      atoi(os.Getenv("RELAY_MAX_MBPS"), 0),
+		RelayMaxConns:     atoi(os.Getenv("RELAY_MAX_CONNS"), 200),
+		STUNURLs:          listOr(os.Getenv("STUN_URLS"), "stun:stun.l.google.com:19302"),
+		TURNURLs:          list(os.Getenv("TURN_URLS")),
+		TURNSecret:        os.Getenv("TURN_SECRET"),
+		RateScale:         scale(os.Getenv("RATE_LIMIT_SCALE")),
+		AndroidPackage:    get("ANDROID_PACKAGE", "com.biohazard786.warpdrop"),
+		AndroidCertSHA256: list(os.Getenv("ANDROID_CERT_SHA256")),
+		LogLevel:          get("LOG_LEVEL", "info"),
+		LogFormat:         get("LOG_FORMAT", "json"),
 	}
 }
 

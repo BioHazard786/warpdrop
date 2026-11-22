@@ -1,9 +1,10 @@
 import { CliBox } from "@/components/cli-box"
 import { Dropzone } from "@/components/dropzone"
 import { FileList } from "@/components/file-list"
+import { NearbyList } from "@/components/nearby-list"
 import { PeerRow } from "@/components/peer-row"
-import { QR } from "@/components/qr"
 import { Section } from "@/components/section"
+import { Share } from "@/components/share-card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -17,24 +18,25 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
 import { Spinner } from "@/components/ui/spinner"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useCloseConfirmation } from "@/hooks/use-close-confirmation"
 import { formatBytes } from "@/lib/format"
 import { useIsSending, useSend } from "@/store/send"
 import {
   IconAlertTriangle,
-  IconDevices,
+  IconLink,
   IconLock,
   IconPlayerStop,
   IconPlus,
+  IconRadar2,
   IconRefresh,
 } from "@tabler/icons-react"
 import { createFileRoute } from "@tanstack/react-router"
-import { useRef, useState } from "react"
+import { type ReactNode, useRef, useState } from "react"
 
 export const Route = createFileRoute("/")({ component: SendPage })
 
@@ -44,99 +46,177 @@ const cli = () => ({
     hint: "Installs the warpdrop CLI. It talks to browsers too.",
   },
   send: { cmd: "warpdrop send photos.zip", hint: "Prints a code and a link anyone can open here." },
+  nearby: {
+    cmd: "warpdrop send --nearby photos.zip",
+    hint: "Pick a device on the same network from a list. No code, and it shows up under Nearby.",
+  },
   receive: {
     cmd: "warpdrop receive <code>",
     hint: "Takes the code from a browser tab or another terminal.",
   },
 })
 
+type Mode = "nearby" | "link"
+
 function SendPage() {
   const s = useSend()
-  useCloseConfirmation(s.phase === "ready" || s.phase === "reconnecting")
+  const [tab, setTab] = useState<Mode>("nearby")
+  const live = s.phase === "ready" || s.phase === "reconnecting"
+  useCloseConfirmation(live && (s.mode === "link" || s.peers.length > 0))
+  const active = s.phase !== "idle"
+  return (
+    <Tabs value={active ? s.mode : tab} onValueChange={(v) => setTab(v as Mode)} className="gap-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <TabsList className="h-10 w-full sm:w-auto">
+          <TabsTrigger value="nearby" disabled={active && s.mode !== "nearby"} className="px-4">
+            <IconRadar2 /> Nearby
+          </TabsTrigger>
+          <TabsTrigger value="link" disabled={active && s.mode !== "link"} className="px-4">
+            <IconLink /> Link
+          </TabsTrigger>
+        </TabsList>
+        {active && (
+          <span className="font-mono text-xs text-muted-foreground">Stop sharing to switch</span>
+        )}
+      </div>
+      <TabsContent value="nearby" className="animate-in fade-in duration-300">
+        <NearbyTab />
+      </TabsContent>
+      <TabsContent value="link" className="animate-in fade-in duration-300">
+        <LinkTab />
+      </TabsContent>
+    </Tabs>
+  )
+}
 
-  if (s.phase === "idle") return <Idle onFiles={s.start} />
+function Stopped() {
+  const s = useSend()
+  return (
+    <Empty className="flex-none border border-dashed py-12">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <IconAlertTriangle />
+        </EmptyMedia>
+        <EmptyTitle>{s.phase === "error" ? "Transfer stopped" : "Transfer closed"}</EmptyTitle>
+        <EmptyDescription>
+          {s.error ?? (s.mode === "link" ? "The share link no longer works." : "The share ended.")}
+        </EmptyDescription>
+      </EmptyHeader>
+      <Button onClick={s.reset}>
+        <IconRefresh data-icon="inline-start" /> Start over
+      </Button>
+    </Empty>
+  )
+}
 
-  if (s.phase === "error" || s.phase === "closed") {
-    return (
-      <Empty className="flex-none border border-dashed py-12">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <IconAlertTriangle />
-          </EmptyMedia>
-          <EmptyTitle>{s.phase === "error" ? "Transfer stopped" : "Transfer closed"}</EmptyTitle>
-          <EmptyDescription>{s.error ?? "The share link no longer works."}</EmptyDescription>
-        </EmptyHeader>
-        <Button onClick={s.reset}>
-          <IconRefresh data-icon="inline-start" /> Start over
-        </Button>
-      </Empty>
-    )
-  }
+function Reconnecting() {
+  return (
+    <Alert>
+      <Spinner />
+      <AlertTitle>Reconnecting to the server</AlertTitle>
+      <AlertDescription>
+        The connection dropped. Transfers already running carry on.
+      </AlertDescription>
+    </Alert>
+  )
+}
 
+function FilesSection({ title, children }: { title: string; children?: ReactNode }) {
+  const s = useSend()
   const total = s.files.reduce((n, f) => n + f.size, 0)
   const locked = s.peers.length > 0
   return (
-    <div className="flex flex-col gap-10">
-      {s.phase === "reconnecting" && (
-        <Alert>
-          <Spinner />
-          <AlertTitle>Reconnecting to the server</AlertTitle>
-          <AlertDescription>The connection dropped. Your link stays valid.</AlertDescription>
-        </Alert>
+    <Section
+      title={title}
+      aside={
+        <>
+          {s.files.length} · {formatBytes(total)}
+          {!locked && <AddFiles onFiles={s.addFiles} />}
+        </>
+      }
+    >
+      <FileList files={s.files} onRemove={locked ? undefined : s.removeFile} />
+      {locked && (
+        <Marker className="text-xs">
+          <MarkerIcon>
+            <IconLock />
+          </MarkerIcon>
+          <MarkerContent>
+            Files are locked once someone joins. Stop sharing to change them.
+          </MarkerContent>
+        </Marker>
       )}
+      {children}
+    </Section>
+  )
+}
 
-      <Share roomId={s.roomId} secret={s.secret} />
+function Receivers({ title }: { title: string }) {
+  const s = useSend()
+  if (s.peers.length === 0) return null
+  return (
+    <Section title={title} aside={s.mode === "link" ? `${s.peers.length} of 10` : undefined}>
+      <ul className="flex flex-col gap-2">
+        {s.peers.map((p) => (
+          <PeerRow key={p.id} peer={p} onCancel={() => s.cancelPeer(p.id)} />
+        ))}
+      </ul>
+    </Section>
+  )
+}
 
-      <Section title="Receivers" aside={`${s.peers.length}/10`}>
-        {s.peers.length === 0 ? (
-          <Empty className="border-2 border-dashed py-10">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <IconDevices />
-              </EmptyMedia>
-              <EmptyTitle className="shimmer">Waiting for someone to open the link</EmptyTitle>
-              <EmptyDescription>
-                Up to 10 people can receive at once. Keep this tab open.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {s.peers.map((p) => (
-              <PeerRow key={p.id} peer={p} onCancel={() => s.cancelPeer(p.id)} />
-            ))}
-          </ul>
-        )}
-      </Section>
-
-      <Section
-        title="Files"
-        aside={
-          <>
-            {s.files.length} · {formatBytes(total)}
-            {!locked && <AddFiles onFiles={s.addFiles} />}
-          </>
-        }
-      >
-        <FileList files={s.files} onRemove={locked ? undefined : s.removeFile} />
-        {locked && (
-          <Marker className="text-xs">
-            <MarkerIcon>
-              <IconLock />
-            </MarkerIcon>
-            <MarkerContent>
-              Files are locked once someone joins. Stop sharing to change them.
-            </MarkerContent>
-          </Marker>
-        )}
-      </Section>
-
-      <StopButton onStop={s.reset} />
+/** Pick files once, then tap any number of devices: each gets its own prompt and progress ring. */
+function NearbyTab() {
+  const s = useSend()
+  const room = s.mode === "nearby" && s.phase !== "idle"
+  if (room && (s.phase === "error" || s.phase === "closed")) return <Stopped />
+  return (
+    <div className="flex flex-col gap-10">
+      {room && s.phase === "reconnecting" && <Reconnecting />}
+      {room ? (
+        <FilesSection title="Selected files" />
+      ) : (
+        <Section title="Selected files">
+          <Dropzone
+            compact
+            onFiles={(f) => s.start(f, true)}
+            hint="or click to browse, then tap the devices below. Send to as many as you like."
+          />
+        </Section>
+      )}
+      <NearbyList />
+      {room && <Receivers title="Transfers" />}
+      {room && (
+        <StopButton
+          onStop={s.reset}
+          label={s.peers.length || Object.keys(s.invites).length ? "Stop sharing" : "Clear files"}
+        />
+      )}
     </div>
   )
 }
 
-function Idle({ onFiles }: { onFiles: (files: File[]) => void }) {
+function LinkTab() {
+  const s = useSend()
+  if (s.phase === "idle") return <LinkIdle onFiles={(f) => s.start(f)} />
+  if (s.phase === "error" || s.phase === "closed") return <Stopped />
+  return (
+    <div className="flex flex-col gap-10">
+      {s.phase === "reconnecting" && <Reconnecting />}
+      <Share
+        roomId={s.roomId}
+        secret={s.secret}
+        link={s.roomId && s.secret ? `${location.origin}/r/${s.roomId}#${s.secret}` : ""}
+        receivers={s.peers.length}
+      />
+      <Receivers title="Receivers" />
+      <FilesSection title="Files" />
+      <StopButton onStop={s.reset} label="Stop sharing" />
+    </div>
+  )
+}
+
+function LinkIdle({ onFiles }: { onFiles: (files: File[]) => void }) {
   const CLI = cli()
   const [tab, setTab] = useState<keyof typeof CLI>("install")
   return (
@@ -168,58 +248,6 @@ function Idle({ onFiles }: { onFiles: (files: File[]) => void }) {
   )
 }
 
-function Share({ roomId, secret }: { roomId: string; secret: string }) {
-  const code = roomId && secret ? `${roomId}-${secret}` : ""
-  const link = code ? `${location.origin}/r/${roomId}#${secret}` : ""
-  return (
-    <Section title="Share" aside={code ? "live while this tab is open" : undefined}>
-      <Card>
-        {!code ? (
-          <CardContent>
-            <Marker role="status" className="py-10 justify-center">
-              <MarkerIcon>
-                <Spinner />
-              </MarkerIcon>
-              <MarkerContent className="shimmer">Creating your link…</MarkerContent>
-            </Marker>
-          </CardContent>
-        ) : (
-          <CardContent className="flex flex-col gap-6 sm:flex-row sm:items-center">
-            <QR value={link} className="self-center sm:self-auto" />
-            <div className="flex min-w-0 flex-1 flex-col gap-4">
-              <div className="flex flex-col gap-1">
-                <span className="font-mono text-xs tracking-wider text-muted-foreground uppercase">
-                  Code
-                </span>
-                <p
-                  className="font-mono text-xl font-medium tracking-tight wrap-break-word select-all sm:text-2xl"
-                  aria-label="Share code"
-                >
-                  <span>{roomId}</span>
-                  <span className="text-muted-foreground">-{secret}</span>
-                </p>
-              </div>
-              <CliBox command={link} prompt={false} />
-              <CliBox command={`warpdrop receive ${code}`} />
-            </div>
-          </CardContent>
-        )}
-        <CardFooter>
-          <Marker className="text-xs">
-            <MarkerIcon>
-              <IconLock />
-            </MarkerIcon>
-            <MarkerContent>
-              The words after the number never reach our server. Without them the link is useless,
-              even to someone who guesses the number.
-            </MarkerContent>
-          </Marker>
-        </CardFooter>
-      </Card>
-    </Section>
-  )
-}
-
 function AddFiles({ onFiles }: { onFiles: (files: File[]) => void }) {
   const input = useRef<HTMLInputElement>(null)
   return (
@@ -237,18 +265,18 @@ function AddFiles({ onFiles }: { onFiles: (files: File[]) => void }) {
           if (files.length) onFiles(files)
         }}
       />
-      <Button variant="outline" size="xs" onClick={() => input.current?.click()}>
+      <Button variant="outline" size="sm" onClick={() => input.current?.click()}>
         <IconPlus data-icon="inline-start" /> Add files
       </Button>
     </>
   )
 }
 
-function StopButton({ onStop }: { onStop: () => void }) {
+function StopButton({ onStop, label: text }: { onStop: () => void; label: string }) {
   const sending = useIsSending()
   const label = (
     <>
-      <IconPlayerStop data-icon="inline-start" /> Stop sharing
+      <IconPlayerStop data-icon="inline-start" /> {text}
     </>
   )
   if (!sending)

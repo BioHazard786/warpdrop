@@ -18,10 +18,20 @@ type rawMsg struct {
 	err  error
 }
 
-// RelayTransport carries frames over a WebSocket through the server's /relay endpoint.
-// After EnableCrypto every frame is AES-256-GCM sealed, so the server only sees ciphertext.
+// msgConn is a message-oriented link: *websocket.Conn, or a TCP stream with length-prefixed frames (lanConn).
+// Message types use the websocket constants (TextMessage, BinaryMessage).
+type msgConn interface {
+	ReadMessage() (typ int, data []byte, err error)
+	WriteMessage(typ int, data []byte) error
+	Close() error
+}
+
+// RelayTransport carries frames over a WebSocket through the server's /relay endpoint, or over a direct TCP
+// connection on the local network ("lan"). After EnableCrypto every frame is AES-256-GCM sealed, so a relay server
+// or anyone on the LAN only sees ciphertext.
 type RelayTransport struct {
-	conn *websocket.Conn
+	conn msgConn
+	kind string
 	raw  chan rawMsg
 	done chan struct{}
 	once sync.Once
@@ -38,10 +48,14 @@ func DialRelay(ctx context.Context, url string) (*RelayTransport, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn.SetReadLimit(1 << 20)
-	t := &RelayTransport{conn: conn, raw: make(chan rawMsg, 16), done: make(chan struct{})}
+	conn.SetReadLimit(maxLANFrame)
+	return newTransport(conn, "relay"), nil
+}
+
+func newTransport(conn msgConn, kind string) *RelayTransport {
+	t := &RelayTransport{conn: conn, kind: kind, raw: make(chan rawMsg, 16), done: make(chan struct{})}
 	go t.readLoop()
-	return t, nil
+	return t
 }
 
 // readLoop only moves raw messages; decryption happens in Recv, after EnableCrypto, so early ciphertext just queues.
@@ -59,7 +73,7 @@ func (t *RelayTransport) readLoop() {
 	}
 }
 
-func (t *RelayTransport) Kind() string                { return "relay" }
+func (t *RelayTransport) Kind() string                { return t.kind }
 func (t *RelayTransport) MaxMessage() int             { return ChunkSize }
 func (t *RelayTransport) Buffered() uint64            { return 0 }   // writes block on the socket, so there is no queue to watch
 func (t *RelayTransport) LocalFingerprint() []byte    { return nil } // not DTLS: the transcript omits fingerprints

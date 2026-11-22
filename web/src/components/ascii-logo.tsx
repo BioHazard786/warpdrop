@@ -70,7 +70,7 @@ export function AsciiLogo({
     <div
       className={cn("relative max-w-full overflow-hidden", className)}
       role="img"
-      aria-label="WarpDrop"
+      aria-label="Warpdrop"
     >
       <pre aria-hidden className={cn(SIZE, "invisible")}>
         {SHADOW}

@@ -25,7 +25,7 @@ export type ReceiverEvent =
       reason?: string
       code?: string
     }
-  | { t: "offer"; files: (FileEntry & { safeName: string })[] }
+  | { t: "offer"; files: (FileEntry & { safeName: string })[]; from: string; sas: string }
   | { t: "progress"; idx: number; bytes: number }
   | { t: "file_done"; idx: number }
 
@@ -48,12 +48,14 @@ const SERVER_ERRORS: Record<string, string> = {
   not_found: "No transfer with that code. It may have finished or expired.",
   room_full: "This transfer already has the maximum number of receivers.",
   rate_limited: "Too many attempts. Wait a minute and try again.",
-  unsupported_version: "This link was made by an incompatible WarpDrop version.",
+  unsupported_version: "This link was made by an incompatible Warpdrop version.",
 }
 
 export class ReceiverClient {
   private roomId: string
   private secret: string
+  /** Nearby only: proves we were invited. The server swaps it for a fresh one on every join. */
+  private ticketIn: string
   private emit: (e: ReceiverEvent) => void
   private config: AppConfig = FALLBACK_CONFIG
   private sig: Signaling | null = null
@@ -68,9 +70,11 @@ export class ReceiverClient {
   private attempt = 0
   private ended = false
 
-  constructor(roomId: string, secret: string, emit: (e: ReceiverEvent) => void) {
+  /** An empty `secret` with an invite `ticket` is a nearby transfer: no words, both screens show a code instead. */
+  constructor(roomId: string, secret: string, emit: (e: ReceiverEvent) => void, ticket = "") {
     this.roomId = roomId
     this.secret = secret
+    this.ticketIn = ticket
     this.emit = emit
   }
 
@@ -122,6 +126,7 @@ export class ReceiverClient {
   private onMessage(m: ServerMsg) {
     switch (m.t) {
       case "joined":
+        if (m.ticket) this.ticketIn = m.ticket
         this.joined?.(true)
         break
       case "signal":
@@ -161,6 +166,7 @@ export class ReceiverClient {
         t: "join_room",
         v: 2,
         room_id: this.roomId,
+        ticket: this.ticketIn || undefined,
         client: { device: deviceName() },
       })
     })
@@ -215,9 +221,9 @@ export class ReceiverClient {
         device: deviceName(),
         sink: this.sink,
         state: this.state,
-        onOffer: (files) => {
+        onOffer: (files, from) => {
           this.status("offered")
-          this.emit({ t: "offer", files })
+          this.emit({ t: "offer", files, from, sas: this.state.sas })
           return new Promise<boolean>((resolve) => {
             this.decide = (accept) => {
               if (accept)

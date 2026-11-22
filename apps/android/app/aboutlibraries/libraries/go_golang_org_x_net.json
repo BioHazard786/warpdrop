@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:golang.org/x/net",
+  "name": "golang.org/x/net",
+  "artifactVersion": "0.63.0",
+  "description": "",
+  "website": "https://pkg.go.dev/golang.org/x/net",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_golang_org_x_net"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/datachannel",
+  "name": "github.com/pion/datachannel",
+  "artifactVersion": "1.6.3",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/datachannel",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_datachannel"
+  ]
+}

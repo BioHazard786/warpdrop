@@ -2,6 +2,7 @@
 // Vectors come from node:crypto, independent of the WebCrypto and Go code that must match them.
 import {
   createCipheriv,
+  createHash,
   createHmac,
   createPrivateKey,
   createPublicKey,
@@ -46,6 +47,20 @@ const label = Buffer.from("warpdrop/2")
 const transcriptRtc = Buffer.concat([label, sPub, rPub, sFp, rFp])
 const transcriptRelay = Buffer.concat([label, sPub, rPub])
 
+// nearby mode: no secret words (empty secret), the sender commits to its key and both sides show a 6-digit code
+const nRoot = hkdf(Buffer.alloc(0), "lobby", "warpdrop/2/root", 32)
+const nKeys = hkdf(shared, nRoot, "warpdrop/2", 64)
+const nAuth = nKeys.subarray(0, 32)
+const nearby = {
+  roomId: "lobby",
+  rootKey: hex(nRoot),
+  authKey: hex(nAuth),
+  sessionKey: hex(nKeys.subarray(32)),
+  commit: hex(createHash("sha256").update(sPub).digest()),
+  transcript: hex(transcriptRelay),
+  sas: String(hmac(nAuth, "sas", transcriptRelay).readUInt32BE(0) % 1_000_000).padStart(6, "0"),
+}
+
 // relay frame: AES-256-GCM, nonce = dir(4) || counter u64 BE, plaintext = kind(1) || payload
 const seal = (dir, counter, kind, payload) => {
   const nonce = Buffer.alloc(12)
@@ -85,6 +100,7 @@ writeFileSync(
       receiverFingerprint: hex(rFp),
       transcriptRtc: hex(transcriptRtc),
       transcriptRelay: hex(transcriptRelay),
+      nearby,
       macs: {
         rtc: {
           recv: hex(hmac(authKey, "recv", transcriptRtc)),

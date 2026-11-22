@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose draws everything; this sets the window background (no white flash in dark mode) and, for dialogs,
+         the plain Material window. DeviceDefault would let Samsung's One UI restyle every Compose dialog into a
+         full-width bottom sheet. -->
+    <style name="Theme.WarpDrop" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

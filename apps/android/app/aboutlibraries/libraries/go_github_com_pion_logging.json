@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/logging",
+  "name": "github.com/pion/logging",
+  "artifactVersion": "0.2.4",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/logging",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_logging"
+  ]
+}

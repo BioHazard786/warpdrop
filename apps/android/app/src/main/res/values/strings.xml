@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Warpdrop</string>
+    <string name="channel_transfers">Transfers</string>
+    <string name="stop">Stop</string>
+    <string name="accept">Accept</string>
+    <string name="decline">Decline</string>
+    <string name="copied">Copied</string>
+    <string name="scan_unavailable">QR scanning needs Google Play services. Type or paste the code instead.</string>
+</resources>

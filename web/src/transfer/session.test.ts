@@ -81,6 +81,7 @@ interface Rig {
   rt: MemoryTransport
   sink: MemSink
   state: ReceiveState
+  offeredFrom: string[]
 }
 
 function rig(
@@ -93,6 +94,7 @@ function rig(
     pair?: [MemoryTransport, MemoryTransport]
   } = {},
 ): Rig {
+  const offeredFrom: string[] = []
   const [st, rt] = o.pair ?? memoryPair()
   const sink = o.sink ?? new MemSink()
   const state = o.state ?? new ReceiveState()
@@ -104,9 +106,9 @@ function rig(
     device: "r",
     sink,
     state,
-    onOffer: async () => o.accept ?? true,
+    onOffer: async (_files, from) => (offeredFrom.push(from), o.accept ?? true),
   })
-  return { s, r, sRes: s.run(), rRes: r.run(), st, rt, sink, state }
+  return { s, r, sRes: s.run(), rRes: r.run(), st, rt, sink, state, offeredFrom }
 }
 
 describe("session over an in-memory transport", () => {
@@ -126,6 +128,7 @@ describe("session over an in-memory transport", () => {
     expect(x.sink.bytes(1)).toEqual(b)
     expect(x.sink.bytes(2).length).toBe(0)
     expect(x.sink.closed).toEqual([0, 1, 2])
+    expect(x.offeredFrom).toEqual(["s"]) // the sender's hello device reaches the prompt
   })
 
   it("moves a file larger than the 32 MiB window (needs receiver acks) with a slow sink", async () => {

@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/miekg/dns",
+  "name": "github.com/miekg/dns",
+  "artifactVersion": "1.1.43",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/miekg/dns",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_miekg_dns"
+  ]
+}

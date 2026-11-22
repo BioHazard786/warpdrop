@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/cespare/xxhash/v2",
+  "name": "github.com/cespare/xxhash/v2",
+  "artifactVersion": "2.3.0",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/cespare/xxhash/v2",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_cespare_xxhash_v2"
+  ]
+}

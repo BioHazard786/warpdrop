@@ -20,8 +20,9 @@ const (
 )
 
 type ReceiveHooks struct {
-	OnStatus   func(status, transport string) // connecting | negotiating | authenticating | offered | receiving | reconnecting
-	OnOffer    func(files []protocol.NamedFile) bool
+	OnStatus   func(status, transport string)                     // connecting | negotiating | authenticating | offered | receiving | reconnecting
+	OnSAS      func(sas string)                                   // nearby only: the code to show beside the offer; called just before OnOffer
+	OnOffer    func(from string, files []protocol.NamedFile) bool // from: the sender's device name
 	OnProgress func(idx int, bytes int64)
 	OnFileDone func(idx int)
 }
@@ -41,6 +42,8 @@ type receiveClient struct {
 	device string
 	h      ReceiveHooks
 
+	joinTicket string // nearby: proves we were invited; the server swaps it for a fresh one on every join (guarded by sigMu)
+
 	sig     *signaling.Client
 	sigMu   sync.Mutex
 	dead    atomic.Bool
@@ -53,7 +56,20 @@ type receiveClient struct {
 }
 
 // RunReceive joins a room and receives its files into sink. It returns nil only when every file arrived and verified.
-func RunReceive(ctx context.Context, cfg config.Config, srv config.Server, roomID, secret, device string, sink protocol.Sink, h ReceiveHooks) (err error) {
+func RunReceive(ctx context.Context, cfg config.Config, srv config.Server, roomID, secret, device string, sink protocol.Sink, h ReceiveHooks) error {
+	return runReceive(ctx, cfg, srv, roomID, secret, "", device, sink, h)
+}
+
+// RunReceiveNearby answers an invite from a device on the same network: there are no secret words, ticket comes
+// from the invite, and h.OnSAS gets the code to compare with the sender's screen.
+func RunReceiveNearby(ctx context.Context, cfg config.Config, srv config.Server, roomID, ticket, device string, sink protocol.Sink, h ReceiveHooks) error {
+	if ticket == "" {
+		return errors.New("a nearby transfer needs an invite")
+	}
+	return runReceive(ctx, cfg, srv, roomID, "", ticket, device, sink, h)
+}
+
+func runReceive(ctx context.Context, cfg config.Config, srv config.Server, roomID, secret, ticket, device string, sink protocol.Sink, h ReceiveHooks) (err error) {
 	state := &protocol.ReceiveState{}
 	// Giving up for any reason must not leave a half-written file behind (resuming keeps it, giving up does not).
 	defer func() {
@@ -61,7 +77,7 @@ func RunReceive(ctx context.Context, cfg config.Config, srv config.Server, roomI
 			state.Discard()
 		}
 	}()
-	c := &receiveClient{cfg: cfg, srv: srv, roomID: roomID, secret: secret, device: device, h: h,
+	c := &receiveClient{cfg: cfg, srv: srv, roomID: roomID, secret: secret, device: device, h: h, joinTicket: ticket,
 		joined: make(chan struct{}, 1), ticket: make(chan string, 1), errMsg: make(chan string, 4)}
 	c.status("connecting", "")
 	defer func() {
@@ -93,7 +109,10 @@ func RunReceive(ctx context.Context, cfg config.Config, srv config.Server, roomI
 			RoomID: roomID, Secret: secret, Device: device, Sink: sink, State: state,
 			OnOffer: func(files []protocol.NamedFile) bool {
 				c.status("offered", t.Kind())
-				ok := h.OnOffer(files)
+				if h.OnSAS != nil && state.SAS != "" {
+					h.OnSAS(state.SAS)
+				}
+				ok := h.OnOffer(state.Sender, files)
 				if ok {
 					c.status("receiving", t.Kind())
 				}
@@ -110,13 +129,7 @@ func RunReceive(ctx context.Context, cfg config.Config, srv config.Server, roomI
 		case protocol.StatusDone:
 			return nil
 		case protocol.StatusFailed:
-			if res.Err != nil {
-				return fmt.Errorf("%s: %w", reasonText[res.Reason], res.Err)
-			}
-			if res.Reason == protocol.ReasonAuthFailed {
-				return ErrWrongSecret
-			}
-			return errors.New(reasonText[res.Reason])
+			return failureErr(res)
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -125,6 +138,17 @@ func RunReceive(ctx context.Context, cfg config.Config, srv config.Server, roomI
 			return errors.New("the connection kept dropping")
 		}
 	}
+}
+
+// failureErr is the error for a session that ended StatusFailed.
+func failureErr(res protocol.Result) error {
+	if res.Err != nil {
+		return fmt.Errorf("%s: %w", reasonText[res.Reason], res.Err)
+	}
+	if res.Reason == protocol.ReasonAuthFailed {
+		return ErrWrongSecret
+	}
+	return errors.New(reasonText[res.Reason])
 }
 
 // ErrWrongSecret means the words did not match the sender's.
@@ -165,6 +189,11 @@ func (c *receiveClient) pump(sig *signaling.Client) {
 	for m := range sig.In {
 		switch m.T {
 		case "joined":
+			if m.Ticket != "" {
+				c.sigMu.Lock()
+				c.joinTicket = m.Ticket
+				c.sigMu.Unlock()
+			}
 			select {
 			case c.joined <- struct{}{}:
 			default:
@@ -203,7 +232,10 @@ func (c *receiveClient) join(ctx context.Context) error {
 	if err := c.dial(ctx); err != nil {
 		return err
 	}
-	c.send(map[string]any{"t": "join_room", "v": 2, "room_id": c.roomID, "client": map[string]any{"device": c.device}})
+	c.sigMu.Lock()
+	ticket := c.joinTicket
+	c.sigMu.Unlock()
+	c.send(map[string]any{"t": "join_room", "v": 2, "room_id": c.roomID, "ticket": ticket, "client": map[string]any{"device": c.device}})
 	select {
 	case <-c.joined:
 		return nil

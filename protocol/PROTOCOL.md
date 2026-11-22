@@ -31,7 +31,7 @@ Every JSON frame, signaling or transfer, carries its type in `t`. The sender's p
 | either → server | `relay_request {to}`; server sends `relay_ticket {peer_id, ticket}` to both |
 | server → client | `peer_left {peer_id}`, `room_closed`, `error {code, message}` |
 
-Error codes: `not_found | room_full | rate_limited | bad_request | unsupported_version | relay_disabled`.
+Nearby lobby messages are in section 7. Error codes: `not_found | room_full | rate_limited | bad_request | unsupported_version | relay_disabled`.
 Limits: 1 sender, up to 10 receivers per room; one room per connection.
 
 ### Relay `/relay/<ticket>`
@@ -104,3 +104,58 @@ The sender closes the transport right after it receives `file_done` for the last
 
 - `fixtures/crypto-vectors.json`: fixed X25519 keys, `root`/`auth`/`session` keys, transcripts, HMACs, relay AES-GCM frames, xxhash64 known answers.
 - `fixtures/transcripts.json`: post-handshake frame sequences with expected outcomes (happy path, zero-byte, duplicate names, hostile names, decline, hash mismatch, resume, overrun). Each step is `{from, frame}` or `{from:"sender", bin:<hex>}`.
+
+## 7. Nearby (same network, no share code)
+
+A second way to meet. The transfer protocol (sections 3-5) is unchanged; only discovery, the room's admission rule and the handshake's authentication differ. Share codes still work exactly as before.
+
+### Lobby
+
+A client opens `/ws?lobby=1` (same path, so proxies need no change; counted in a separate per-IP connection pool) and sends `nearby_join {v:2, device, client, hidden?}`. A lobby socket may send only `nearby_*` messages and every other socket none of them.
+
+The server groups clients by network: the same public IPv4, the same IPv6 /64, or any private/loopback/link-local address.
+
+| Direction | Message |
+|---|---|
+| client → server | `nearby_join {v, device, client, hidden}` → `nearby_joined {peer_id, devices:[{peer_id, device, client}]}`. `hidden` clients see the list and can send, but are not listed and cannot be invited |
+| server → client | `nearby_peer {peer}`, `nearby_peer_left {peer_id}` |
+| client → server | `nearby_leave` |
+| sender → server | `nearby_invite {to, room_id, token}`; `token` proves the sender created the room |
+| server → target | `nearby_invite {peer, room_id, ticket}` |
+| target → server | `nearby_decline {room_id, ticket, reason}`; `reason` is `declined` or `busy`; spends the ticket |
+| server → sender (room socket) | `invite_declined {peer_id, device, reason}`; `peer_id` is the `to` it invited |
+
+Limits: 50 devices per network. A client in the lobby cannot also be in a room on that connection.
+
+### Gated rooms
+
+The sender creates its room on a normal `/ws` socket with `create_room {nearby:true}`. Such a room admits a receiver only with `join_room {ticket}`: single-use tickets issued by `nearby_invite`. An unknown or spent ticket gets `not_found`, the same answer as a missing room. `joined` carries a fresh `ticket` so the receiver can rejoin after its signaling socket drops. Senders give up on an invite nobody answers after 60 s.
+
+### Handshake without secret words
+
+The secret is the empty string, so `root = HKDF(ikm="", salt=room_id, ...)` and the MACs only prove both sides derived the same keys. What stops a man-in-the-middle is a 6-digit code both users compare:
+
+1. Sender: `hello {pub:"", commit}`, `commit = hex(SHA-256(senderPub))`. The receiver sends nothing yet.
+2. Receiver, having seen the commitment: `hello {pub}`.
+3. Sender: `reveal {pub}`. Receiver checks `SHA-256(pub) == commit`, otherwise `protocol_error`.
+4. `auth` frames as in section 3.
+5. `sas = uint32_be(HMAC-SHA256(authKey, "sas" ‖ transcript)[0:4]) mod 10^6`, zero-padded to 6 digits. Both sides display it before the receiver accepts.
+
+The order matters: the sender fixes its key before it sees the receiver's, and the receiver fixes its key before the sender reveals, so an attacker cannot choose keys that make the two sides' codes match. Each side's code is then effectively a 1-in-10^6 guess.
+
+`shortcut: the code authenticates the session only if the users actually compare it, and it does not stop someone on the network from asking to send. Receivers must accept each transfer. Upgrade path: remembered devices with long-term identity keys.`
+
+Test vectors: `fixtures/crypto-vectors.json` key `nearby`.
+
+### Direct connection on the local network (native clients only)
+
+Browsers cannot do mDNS or open sockets, so this exists only between CLI, Android and desktop apps. It needs no server, so it works offline. Web clients are reached through the lobby as above.
+
+**Discovery**: DNS-SD service `_warpdrop._tcp` on `local.`. Instance name = a random per-process id. TXT: `v=2`, `id=<same id>`, `name=<device label>`, `client=<cli|mobile|...>`. SRV/A/AAAA give the TCP port and addresses (link-local IPv6 is skipped: it cannot be dialed without a zone). A device is also in the lobby list under the same `device` label; clients merge the two lists by that name and prefer the direct route, falling back to an invite when the dial fails.
+
+**Roles**: the dialer is the sender, the listener is the receiver. `room_id` is the constant `"lan"`, the secret is empty, so the handshake is exactly section 7's code-less one and both users compare the 6-digit code.
+
+**Framing**: the relay's (section 4), with the WebSocket message replaced by `type(1) ‖ len(4, big-endian) ‖ data`: `type` 1 = text, 2 = binary; `len` at most 1 MiB. Anything else closes the connection. Text only before the cipher is enabled; after, every frame is sealed and keepalives run as on the relay. Writes block on the socket, which is the backpressure.
+
+**Receiver rules** (anyone on the network can connect): one connection is handled at a time and others are closed at once; handshakes time out after 20 s; an address whose offer was declined or cancelled is ignored for 30 s; the user is asked for every transfer. There is no resume: a dropped connection fails the transfer and the sender starts again.
+

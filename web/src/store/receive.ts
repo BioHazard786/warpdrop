@@ -11,12 +11,16 @@ interface ReceiveState {
   reason?: string
   code?: string
   files: OfferedFile[]
+  /** The sender's device name, known once the file list arrives. */
+  from: string
+  /** Nearby transfers only: the 6-digit code that must match the sender's screen. */
+  sas: string
   total: number
   received: number
   filesDone: number
   speed: number
   eta: number
-  start(roomId: string, secret: string): void
+  start(roomId: string, secret: string, ticket?: string): void
   respond(accept: boolean): void
   cancel(): void
   reset(): void
@@ -62,7 +66,7 @@ export const useReceive = create<ReceiveState>((set, get) => {
           prefix.push(acc)
           acc += f.size
         }
-        set({ files: e.files, total: acc })
+        set({ files: e.files, from: e.from, sas: e.sas, total: acc })
         break
       }
       case "progress":
@@ -77,6 +81,8 @@ export const useReceive = create<ReceiveState>((set, get) => {
   const blank = {
     status: "idle" as const,
     files: [],
+    from: "",
+    sas: "",
     total: 0,
     received: 0,
     filesDone: 0,
@@ -88,7 +94,7 @@ export const useReceive = create<ReceiveState>((set, get) => {
   }
   return {
     ...blank,
-    start(roomId, secret) {
+    start(roomId, secret, ticket) {
       const old = client
       client = null // detach first so the old client's farewell events are dropped
       old?.cancel()
@@ -96,9 +102,14 @@ export const useReceive = create<ReceiveState>((set, get) => {
       meter = new SpeedMeter()
       latest = 0
       set({ ...blank, status: "connecting" })
-      const c = new ReceiverClient(roomId, secret, (e) => {
-        if (client === c) onEvent(e) // ignore events from a client that was replaced or reset
-      })
+      const c = new ReceiverClient(
+        roomId,
+        secret,
+        (e) => {
+          if (client === c) onEvent(e) // ignore events from a client that was replaced or reset
+        },
+        ticket,
+      )
       client = c
       void c.start()
     },

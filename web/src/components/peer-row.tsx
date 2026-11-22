@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/item"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
-import { formatBytes, formatETA, formatSpeed } from "@/lib/format"
+import { formatBytes, formatCode, formatETA, formatSpeed } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { PeerRow as Peer } from "@/store/send"
 
@@ -52,7 +52,10 @@ export function PeerRow({ peer, onCancel }: { peer: Peer; onCancel: () => void }
               {formatETA(peer.eta)}
             </>
           ) : peer.status === "waiting" ? (
-            <span className="shimmer">Waiting for them to accept</span>
+            <>
+              <span className="shimmer">Waiting for them to accept</span>
+              {peer.sas && <> · code {formatCode(peer.sas)}</>}
+            </>
           ) : peer.status === "done" ? (
             <>
               {formatBytes(peer.total)} · {peer.filesDone} {peer.filesDone === 1 ? "file" : "files"}

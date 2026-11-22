@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/transport/v5",
+  "name": "github.com/pion/transport/v5",
+  "artifactVersion": "5.1.4",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/transport/v5",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_transport_v5"
+  ]
+}

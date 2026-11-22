@@ -1,8 +1,10 @@
 // Drivers that run the pure machines over a Transport: handshake, hashing, flow control, resume.
 import { createXXHash64 } from "hash-wasm"
 import {
+  commit,
   deriveKeys,
   mac,
+  sas as sasCode,
   newEphemeral,
   toHex,
   fromHex,
@@ -93,7 +95,10 @@ class Inbox {
   }
 }
 
-type HandshakeOutcome = { ok: true } | { ok: false; result: Result }
+/** peerDevice is the name the peer put in its hello: a label for the UI, not covered by the MAC. sas is set in nearby mode only. */
+type HandshakeOutcome =
+  | { ok: true; peerDevice: string; sas: string }
+  | { ok: false; result: Result }
 const authFailed: HandshakeOutcome = {
   ok: false,
   result: { status: "failed", reason: "auth_failed", byPeer: false },
@@ -104,6 +109,10 @@ const protocolFailed: HandshakeOutcome = {
   result: { status: "failed", reason: "protocol_error", byPeer: false },
 }
 
+/**
+ * An empty secret means nearby mode: there are no shared words, so the sender commits to its key first (the
+ * receiver reveals nothing until it has seen the commitment) and the users compare the returned `sas` instead.
+ */
 async function handshake(
   role: "sender" | "receiver",
   t: Transport,
@@ -112,23 +121,59 @@ async function handshake(
   secret: string,
   device: string,
 ): Promise<HandshakeOutcome> {
+  const nearby = secret === ""
   const deadline = Date.now() + HANDSHAKE_TIMEOUT_MS
-  const wait = async () => {
+  /** The next frame, which must be a `type`; otherwise the outcome to end with. */
+  const expect = async <T extends Frame["t"]>(
+    type: T,
+  ): Promise<Extract<Frame, { t: T }> | HandshakeOutcome> => {
     const w = await inbox.next(Math.max(1, deadline - Date.now()))
-    if (w === undefined || w === null) return null
-    if (typeof w !== "string") return "bad" as const
-    return parseFrame(w) ?? ("bad" as const)
+    if (w === undefined || w === null) return closedOut
+    const f = typeof w === "string" ? parseFrame(w) : null
+    if (f === null) return protocolFailed
+    if (f.t === "cancel")
+      return { ok: false, result: { status: "failed", reason: f.reason, byPeer: true } }
+    return f.t === type ? (f as Extract<Frame, { t: T }>) : protocolFailed
   }
-  const eph: Ephemeral = await newEphemeral()
-  t.send(encodeFrame({ t: "hello", v: PROTOCOL_V, client: "web/2", device, pub: toHex(eph.pub) }))
+  const failure = (x: object): x is HandshakeOutcome => "ok" in x
+  const hello = (pub: string, commitHex?: string): Frame => ({
+    t: "hello",
+    v: PROTOCOL_V,
+    client: "web/2",
+    device,
+    pub,
+    ...(commitHex ? { commit: commitHex } : {}),
+  })
 
-  const hello = await wait()
-  if (hello === null) return closedOut
-  if (hello === "bad") return protocolFailed
-  if (hello.t === "cancel")
-    return { ok: false, result: { status: "failed", reason: hello.reason, byPeer: true } }
-  if (hello.t !== "hello" || hello.v !== PROTOCOL_V) return protocolFailed
-  const peerPub = fromHex(hello.pub)
+  const eph: Ephemeral = await newEphemeral()
+  let peerDevice: string
+  let peerPub: Uint8Array
+  if (nearby && role === "sender") {
+    t.send(encodeFrame(hello("", await commit(eph.pub))))
+    const h = await expect("hello")
+    if (failure(h)) return h
+    if (h.v !== PROTOCOL_V || h.commit !== undefined) return protocolFailed
+    t.send(encodeFrame({ t: "reveal", pub: toHex(eph.pub) }))
+    peerDevice = h.device
+    peerPub = fromHex(h.pub)
+  } else if (nearby) {
+    const h = await expect("hello")
+    if (failure(h)) return h
+    if (h.v !== PROTOCOL_V || h.commit === undefined) return protocolFailed
+    t.send(encodeFrame(hello(toHex(eph.pub)))) // only now: the sender is already bound to its key
+    const r = await expect("reveal")
+    if (failure(r)) return r
+    peerPub = fromHex(r.pub)
+    if ((await commit(peerPub)) !== h.commit) return protocolFailed
+    peerDevice = h.device
+  } else {
+    t.send(encodeFrame(hello(toHex(eph.pub))))
+    const h = await expect("hello")
+    if (failure(h)) return h
+    if (h.v !== PROTOCOL_V || h.commit !== undefined) return protocolFailed
+    peerDevice = h.device
+    peerPub = fromHex(h.pub)
+  }
   if (peerPub.length !== 32) return protocolFailed
 
   const keys = await deriveKeys(secret, roomId, eph, peerPub)
@@ -141,12 +186,8 @@ async function handshake(
 
   if (role === "receiver")
     t.send(encodeFrame({ t: "auth", mac: await mac(keys.authKey, "recv", tr) }))
-  const a = await wait()
-  if (a === null) return closedOut
-  if (a === "bad") return protocolFailed
-  if (a.t === "cancel")
-    return { ok: false, result: { status: "failed", reason: a.reason, byPeer: true } }
-  if (a.t !== "auth") return protocolFailed
+  const a = await expect("auth")
+  if (failure(a)) return a
   const ok = await verifyMac(keys.authKey, role === "sender" ? "recv" : "send", tr, a.mac)
   if (!ok) {
     t.send(encodeFrame({ t: "cancel", reason: "auth_failed" }))
@@ -155,7 +196,13 @@ async function handshake(
   if (role === "sender")
     t.send(encodeFrame({ t: "auth", mac: await mac(keys.authKey, "send", tr) }))
   await t.enableCrypto(keys.sessionKey, role)
-  return { ok: true }
+  return { ok: true, peerDevice, sas: nearby ? await sasCode(keys.authKey, tr) : "" }
+}
+
+/** A peer-chosen device name, trimmed for display (same limits the sender applies to receiver names). */
+function senderName(device: string): string {
+  const name = [...device.trim()].slice(0, 64).join("")
+  return name || "sender"
 }
 
 /** Tell the peer why (protocol errors only; auth failures were already announced) and close, so it never waits out the timeout. */
@@ -183,6 +230,8 @@ export interface SenderOptions {
   onFileDone?: (idx: number) => void
   /** The handshake passed and the file list is out: now it's up to the receiver to accept. */
   onOffered?: () => void
+  /** Nearby mode only (empty secret): the code to show; the receiver's screen must show the same one. */
+  onSas?: (sas: string) => void
 }
 
 export class SenderSession {
@@ -225,6 +274,7 @@ export class SenderSession {
       )
       return this.result
     }
+    if (hs.sas) this.o.onSas?.(hs.sas)
     this.t.send(manifest)
     this.o.onOffered?.()
     inbox.setHandler((w) => {
@@ -361,6 +411,8 @@ export class ReceiveState {
   manifest: string | null = null
   files: (FileEntry & { safeName: string })[] = []
   accepted = false
+  /** Nearby mode only: the 6-digit code to show beside the offer. */
+  sas = ""
   nextIdx = 0
   cur: {
     idx: number
@@ -384,8 +436,8 @@ export interface ReceiverOptions {
   device: string
   sink: Sink
   state: ReceiveState
-  /** Ask the user. Called once per transfer, not again on resume. */
-  onOffer: (files: (FileEntry & { safeName: string })[]) => Promise<boolean>
+  /** Ask the user. Called once per transfer, not again on resume. [from] is the sender's device name. */
+  onOffer: (files: (FileEntry & { safeName: string })[], from: string) => Promise<boolean>
   onProgress?: (idx: number, bytes: number) => void
   onFileDone?: (idx: number) => void
   /** Overrides SINK_STALL_MS (tests). */
@@ -402,6 +454,7 @@ export class ReceiverSession {
   private o: ReceiverOptions
   private t: Transport
   private st: ReceiveState
+  private sender = "sender"
 
   constructor(o: ReceiverOptions) {
     this.o = o
@@ -432,6 +485,8 @@ export class ReceiverSession {
       this.resolve(failHandshake(this.t, hs.result))
       return this.result
     }
+    this.sender = senderName(hs.peerDevice)
+    this.st.sas = hs.sas
     let last = Date.now()
     const watchdog = setInterval(() => {
       const busy =
@@ -496,7 +551,7 @@ export class ReceiverSession {
         const first = st.manifest === null
         st.manifest = key
         st.files = fx.files
-        const ok = st.accepted || (first && (await this.o.onOffer(fx.files)))
+        const ok = st.accepted || (first && (await this.o.onOffer(fx.files, this.sender)))
         if (!ok) return void this.enqueue({ e: "decline" })
         st.accepted = true
         const resume = st.cur

@@ -1,0 +1,14 @@
+WarpDrop sends files straight from one device to another, end-to-end encrypted. Nothing is uploaded to a cloud, there is no account, and the files never sit on a server.
+
+<br><b>Features:</b>
+
+- Nearby devices on your Wi-Fi show up in the Send tab: tap one and send. Works with no internet at all
+- Share with a short code or a QR code: the receiver can use this app, the web app or the command line
+- Direct device-to-device transfer (WebRTC), with an encrypted relay as the fallback when a direct path is blocked
+- Share → WarpDrop from any app
+- Large files and many files, written to your Downloads as they arrive and checked with a checksum before they are published
+- Material 3 Expressive design with Material You colors and an AMOLED theme
+- Self-hostable: point the app at your own server in Settings
+- Open source, no ads, no tracking
+
+Works with the WarpDrop web app (drop.warplabs.info) and the warpdrop command-line tool.

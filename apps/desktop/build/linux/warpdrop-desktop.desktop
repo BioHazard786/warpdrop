@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=warpdrop-desktop
+Exec=warpdrop-desktop
+Icon=warpdrop-desktop
+Categories=Development;
+Terminal=false
+Keywords=wails
+Version=1.0
+StartupNotify=false

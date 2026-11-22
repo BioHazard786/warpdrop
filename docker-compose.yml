@@ -25,6 +25,9 @@ services:
       # TURN is used only when BOTH of these are set
       TURN_URLS: ${TURN_URLS:-}
       TURN_SECRET: ${TURN_SECRET:-}
+      # Android app: signing-cert SHA-256(s) so share links open the app (served at /.well-known/assetlinks.json)
+      ANDROID_PACKAGE: ${ANDROID_PACKAGE:-com.biohazard786.warpdrop}
+      ANDROID_CERT_SHA256: ${ANDROID_CERT_SHA256:-}
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]

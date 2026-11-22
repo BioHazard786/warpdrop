@@ -21,14 +21,12 @@ type RTCTransport struct {
 	max  int
 }
 
+// newRTCTransport wires a data channel's handlers. Call it as soon as the channel exists, not when it opens:
+// the peer may send its first frame the instant the channel opens, and pion drops messages that arrive
+// while no OnMessage handler is set.
 func newRTCTransport(pc *webrtc.PeerConnection, dc *webrtc.DataChannel) *RTCTransport {
 	t := &RTCTransport{pc: pc, dc: dc, recv: make(chan Wire, 64), done: make(chan struct{}), low: make(chan struct{}, 1)}
 	t.max = 64 << 10 // the smallest interoperable SCTP message, until the peer says otherwise
-	if sctp := pc.SCTP(); sctp != nil {
-		if m := int(sctp.GetCapabilities().MaxMessageSize); m >= 16<<10 {
-			t.max = m
-		}
-	}
 	dc.SetBufferedAmountLowThreshold(LowWater)
 	dc.OnBufferedAmountLow(func() {
 		select {
@@ -48,12 +46,21 @@ func newRTCTransport(pc *webrtc.PeerConnection, dc *webrtc.DataChannel) *RTCTran
 		}
 	})
 	dc.OnClose(func() { go t.Close() })
-	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
+	return t
+}
+
+// opened runs once the channel is open and negotiation is complete: only now is the peer's message size known.
+func (t *RTCTransport) opened() {
+	if sctp := t.pc.SCTP(); sctp != nil {
+		if m := int(sctp.GetCapabilities().MaxMessageSize); m >= 16<<10 {
+			t.max = m
+		}
+	}
+	t.pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
 			go t.Close()
 		}
 	})
-	return t
 }
 
 func (t *RTCTransport) Kind() string     { return "rtc" }
@@ -178,8 +185,20 @@ type RTCPeer struct {
 	remoteSet bool
 }
 
+// rtcAPI tunes pion's SCTP for bulk transfer over Wi-Fi. With the defaults, one lost packet halves the congestion
+// window and it regrows by one packet per round trip, so a lossy link settles at a few MB/s; a floor and a bigger
+// growth step let it recover in a few round trips. The larger receive buffer lets a fast sender keep more in flight.
+var rtcAPI = func() *webrtc.API {
+	var se webrtc.SettingEngine
+	se.SetSCTPMinCwnd(256 << 10)
+	se.SetSCTPFastRtxWnd(256 << 10)
+	se.SetSCTPCwndCAStep(16 << 10)
+	se.SetSCTPMaxReceiveBufferSize(8 << 20)
+	return webrtc.NewAPI(webrtc.WithSettingEngine(se))
+}()
+
 func NewRTCPeer(o RTCPeerOptions) (*RTCPeer, error) {
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{ICEServers: o.ICEServers})
+	pc, err := rtcAPI.NewPeerConnection(webrtc.Configuration{ICEServers: o.ICEServers})
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +231,8 @@ func NewRTCPeer(o RTCPeerOptions) (*RTCPeer, error) {
 }
 
 func (p *RTCPeer) watch(dc *webrtc.DataChannel) {
-	dc.OnOpen(func() { p.ready <- newRTCTransport(p.pc, dc) })
+	t := newRTCTransport(p.pc, dc)
+	dc.OnOpen(func() { t.opened(); p.ready <- t })
 }
 
 // Start makes the offer (offerer only).

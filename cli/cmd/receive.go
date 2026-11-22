@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BioHazard786/Warpdrop/cli/internal/lan"
+	"github.com/BioHazard786/Warpdrop/cli/internal/nearby"
 	"github.com/BioHazard786/Warpdrop/cli/internal/protocol"
 	"github.com/BioHazard786/Warpdrop/cli/internal/transfer"
 	"github.com/BioHazard786/Warpdrop/cli/internal/ui"
@@ -22,10 +24,12 @@ var (
 	flagDir string
 	flagZip bool
 	flagYes bool
+
+	flagRecvNearby bool
 )
 
 var receiveCmd = &cobra.Command{
-	Use:     "receive <code|link>",
+	Use:     "receive <code|link> | --nearby",
 	Aliases: []string{"r"},
 	Short:   "Receive files from a browser or another CLI",
 	Long: `Receive files using the code or link the sender shows. Files are saved to the current directory
@@ -34,17 +38,32 @@ var receiveCmd = &cobra.Command{
 Examples:
   warpdrop receive 4821-amber-otter-kite-moth
   warpdrop receive 'https://drop.warplabs.info/r/4821#amber-otter-kite-moth' --dir ~/Downloads
-  warpdrop receive 4821-amber-otter-kite-moth --yes --zip`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error { return runReceive(cmd.Context(), args[0]) },
+  warpdrop receive 4821-amber-otter-kite-moth --yes --zip
+  warpdrop receive --nearby             # show up on this network and wait for someone to send to you`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if flagRecvNearby {
+			return cobra.NoArgs(cmd, args)
+		}
+		return cobra.ExactArgs(1)(cmd, args)
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		input := ""
+		if len(args) > 0 {
+			input = args[0]
+		}
+		return runReceive(cmd.Context(), input)
+	},
 }
 
 func runReceive(ctx context.Context, input string) error {
-	share, ok := protocol.ParseShare(input)
-	if !ok {
-		return errors.New("not a WarpDrop code or link (expected e.g. 4821-amber-otter-kite-moth)")
+	var share protocol.Share
+	if !flagRecvNearby {
+		var ok bool
+		if share, ok = protocol.ParseShare(input); !ok {
+			return errors.New("not a WarpDrop code or link (expected e.g. 4821-amber-otter-kite-moth)")
+		}
 	}
-	if share.Secret == "" { // a bare room number or a link without its #words
+	if !flagRecvNearby && share.Secret == "" { // a bare room number or a link without its #words
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return errors.New("the secret words are missing: pass the full code, e.g. 4821-amber-otter-kite-moth")
 		}
@@ -64,8 +83,43 @@ func runReceive(ctx context.Context, input string) error {
 	stop := ui.RunConnectionSpinner("Connecting to server...")
 	srv, err := cfg.Fetch(ctx)
 	stop()
-	if err != nil {
+	if err != nil && !flagRecvNearby {
 		return err
+	}
+	online := err == nil
+
+	run := func(sink protocol.Sink, h transfer.ReceiveHooks) error {
+		return transfer.RunReceive(ctx, cfg, srv, share.RoomID, share.Secret, deviceName(), sink, h)
+	}
+	if flagRecvNearby {
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			return errors.New("not a terminal: nearby transfers always ask before accepting, so they need one")
+		}
+		// show up on the local network (works with no internet) and, when the server is reachable, in its list
+		ln, lanErr := lan.Listen(lan.NewID(), deviceName(), "cli")
+		var lobby *nearby.Lobby
+		if online {
+			var lerr error
+			if lobby, lerr = joinNearby(ctx, cfg, false); lerr != nil {
+				ui.PrintWarningf("Not listed on the server: %v", lerr)
+			} else {
+				defer lobby.Close()
+			}
+		} else {
+			ui.PrintWarning("Server unreachable: visible on the local network only")
+		}
+		if lanErr != nil {
+			ui.PrintWarningf("Not visible on the local network: %v", lanErr)
+		} else {
+			defer ln.Close()
+		}
+		if lanErr != nil && lobby == nil {
+			return errors.New("cannot be seen by anyone: no server and no local network")
+		}
+		ui.PrintInfof("Visible as %s. Waiting for someone to send to you... (Ctrl-C to stop)", deviceName())
+		run = func(sink protocol.Sink, h transfer.ReceiveHooks) error {
+			return receiveNearby(ctx, cfg, srv, ln, lobby, sink, h)
+		}
 	}
 
 	outDir := flagDir
@@ -90,19 +144,21 @@ func runReceive(ctx context.Context, input string) error {
 	var total int64
 	var names []string
 	start := time.Now()
-	err = transfer.RunReceive(ctx, cfg, srv, share.RoomID, share.Secret, deviceName(), sink, transfer.ReceiveHooks{
+	var sas string
+	err = run(sink, transfer.ReceiveHooks{
+		OnSAS: func(s string) { sas = s },
 		OnStatus: func(status, tr string) {
 			switch status {
 			case "authenticating":
 				m.Clear()
-				via := map[string]string{"rtc": "direct", "relay": "relay"}[tr]
+				via := map[string]string{"rtc": "direct", "relay": "relay", "lan": "local network"}[tr]
 				ui.PrintInfof("Connected (%s), verifying...", via)
 			case "reconnecting":
 				m.Clear()
 				ui.PrintWarning("Connection lost, resuming...")
 			}
 		},
-		OnOffer: func(fs []protocol.NamedFile) bool {
+		OnOffer: func(from string, fs []protocol.NamedFile) bool {
 			total = 0
 			prefix, names = nil, nil
 			items := make([]ui.FileTableItem, len(fs))
@@ -117,11 +173,15 @@ func runReceive(ctx context.Context, input string) error {
 				}
 			}
 			fmt.Println()
+			ui.PrintInfof("From %s", from)
 			ui.RenderFileTable(items)
 			if renamed > 0 {
 				ui.PrintWarningf("%d unsafe name(s) were cleaned up before saving", renamed)
 			}
-			return confirm(fmt.Sprintf("Receive %d file(s), %s?", len(fs), utils.FormatSize(total)))
+			if sas != "" { // nearby: no code was typed, so the people compare these digits instead
+				ui.PrintInfof("Code %s: it must match the code on %s's screen", fmtSAS(sas), from)
+			}
+			return confirm(fmt.Sprintf("Receive %d file(s), %s, from %s?", len(fs), utils.FormatSize(total), from), sas == "")
 		},
 		OnProgress: func(idx int, b int64) { m.Update("receiving", prefix[idx]+b, total) },
 	})
@@ -160,8 +220,9 @@ func zipResult(tmp, dest string) error {
 }
 
 // confirm asks the user unless --yes. Without a terminal and without --yes the answer is no: never accept silently.
-func confirm(q string) bool {
-	if flagYes {
+// --yes is ignored for nearby offers (allowYes=false): anyone on the network can send one.
+func confirm(q string, allowYes bool) bool {
+	if flagYes && allowYes {
 		return true
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -181,5 +242,6 @@ func init() {
 	rootCmd.AddCommand(receiveCmd)
 	receiveCmd.Flags().StringVarP(&flagDir, "dir", "d", "", "Directory to save into (default: current directory)")
 	receiveCmd.Flags().BoolVarP(&flagZip, "zip", "z", false, "Save everything as one zip")
+	receiveCmd.Flags().BoolVarP(&flagRecvNearby, "nearby", "n", false, "Show up to devices on this network and wait for one to send")
 	receiveCmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Accept without asking")
 }

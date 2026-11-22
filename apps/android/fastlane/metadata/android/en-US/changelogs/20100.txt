@@ -1,0 +1,5 @@
+v2.1.0 - First Android release
+ - Send and receive files with nearby devices, a share code or a QR code
+ - Direct, end-to-end encrypted transfers with a relay fallback
+ - Share to WarpDrop from any app
+ - Material You and AMOLED themes

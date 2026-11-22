@@ -86,6 +86,32 @@ jobs:
           path: e2e/playwright-report
           retention-days: 7
 
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - name: SDK platform and NDK (the NDK builds the Go core)
+        run: sdkmanager "platforms;android-37.2" "ndk;30.0.16248370"
+      - run: go install golang.org/x/mobile/cmd/gomobile@latest
+      - name: Build the Go core (apps/android/app/libs/warpcore.aar)
+        run: make core NDK="$ANDROID_HOME/ndk/30.0.16248370"
+        working-directory: apps/android
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          # the wrapper is checked into apps/android/, not the repository root
+          build-root-directory: apps/android
+      - run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --console=plain
+        working-directory: apps/android
+
   shell-and-deploy:
     runs-on: ubuntu-latest
     steps:

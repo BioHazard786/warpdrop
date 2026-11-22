@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/gorilla/websocket",
+  "name": "github.com/gorilla/websocket",
+  "artifactVersion": "1.5.3",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/gorilla/websocket",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_gorilla_websocket"
+  ]
+}

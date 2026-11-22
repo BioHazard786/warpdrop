@@ -7,8 +7,8 @@ export function ThemeToggle() {
   const { theme, setTheme } = useTheme()
   return (
     <Button
-      variant="outline"
-      size="icon"
+      variant="ghost"
+      size="icon-sm"
       className="absolute top-4 right-4 z-40"
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
       aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}

@@ -16,6 +16,15 @@
   "receiverFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "transcriptRtc": "7761727064726f702f327b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f130faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "transcriptRelay": "7761727064726f702f327b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f130faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20",
+  "nearby": {
+    "roomId": "lobby",
+    "rootKey": "6918006b0454aefd4611e18e4925229905eb29265fac19580fc5866292d8478a",
+    "authKey": "1d25657aadc6a0fb78f103ccdb5d88a0f2c3efd74a497acf8fac40d01d054095",
+    "sessionKey": "288a3dc7cd532eb2e9675891d36d187a6a836e5f88483ccaecf6ce314cac5eca",
+    "commit": "d19bf3f082782c87b783fe7134698aeff6e66d9f86afaf7cf9e9b8bf40bab3ff",
+    "transcript": "7761727064726f702f327b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f130faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20",
+    "sas": "430839"
+  },
   "macs": {
     "rtc": {
       "recv": "0e4a990afab783f75753f9ad3484f7e236b61ac2c4c3f91d032c5f2be0b16661",

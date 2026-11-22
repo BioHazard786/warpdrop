@@ -136,6 +136,19 @@ export async function verifyMac(
   )
 }
 
+/** hex(SHA-256(pub)): a nearby sender sends this before it learns the receiver's key. */
+export async function commit(pub: Uint8Array): Promise<string> {
+  return toHex(new Uint8Array(await subtle.digest("SHA-256", buf(pub))))
+}
+
+/** The 6-digit code both screens show in nearby mode: binds both public keys, so a man-in-the-middle sees two different codes. */
+export async function sas(authKey: Uint8Array, t: Uint8Array): Promise<string> {
+  const sig = new Uint8Array(
+    await subtle.sign("HMAC", await hmacKey(authKey, "sign"), concat(enc.encode("sas"), t)),
+  )
+  return String(new DataView(sig.buffer).getUint32(0) % 1_000_000).padStart(6, "0")
+}
+
 /** Relay frame cipher for one direction. dir: 1 = sender→receiver, 2 = receiver→sender. */
 export class FrameCipher {
   private counter = 0n

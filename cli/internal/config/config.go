@@ -23,6 +23,7 @@ type Config struct {
 }
 
 // Resolve applies precedence: flag > WARPDROP_SERVER env > default. A bare domain means https.
+// The CLI saves a server with `warpdrop config set server`; loadConfig in cmd feeds that in via Pick.
 func Resolve(flag string, forceRelay bool) (Config, error) {
 	s := flag
 	if s == "" {
@@ -31,17 +32,27 @@ func Resolve(flag string, forceRelay bool) (Config, error) {
 	if s == "" {
 		s = DefaultServer
 	}
+	server, err := NormalizeServer(s)
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{Server: server, ForceRelay: forceRelay}, nil
+}
+
+// NormalizeServer validates a server address. A bare domain means https.
+func NormalizeServer(s string) (string, error) {
+	s = strings.TrimSpace(s)
 	if !strings.Contains(s, "://") {
 		s = "https://" + s
 	}
 	u, err := url.Parse(s)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return Config{}, fmt.Errorf("invalid server %q (want https://host or host)", s)
+		return "", fmt.Errorf("invalid server %q (want https://host or host)", s)
 	}
-	return Config{Server: strings.TrimRight(u.String(), "/"), ForceRelay: forceRelay}, nil
+	return strings.TrimRight(u.String(), "/"), nil
 }
 
-// WSURL returns the websocket URL for a server path, e.g. "/ws" or "/relay/<ticket>".
+// WSURL returns the websocket URL for a server path, e.g. "/ws", "/ws?lobby=1" or "/relay/<ticket>".
 func (c Config) WSURL(path string) string {
 	u, _ := url.Parse(c.Server)
 	if u.Scheme == "https" {
@@ -49,6 +60,7 @@ func (c Config) WSURL(path string) string {
 	} else {
 		u.Scheme = "ws"
 	}
+	path, u.RawQuery, _ = strings.Cut(path, "?")
 	u.Path = path
 	return u.String()
 }
@@ -66,8 +78,9 @@ type Server struct {
 		Username   string   `json:"username"`
 		Credential string   `json:"credential"`
 	} `json:"iceServers"`
-	Relay        bool `json:"relay"`
-	MaxReceivers int  `json:"maxReceivers"`
+	Relay        bool   `json:"relay"`
+	MaxReceivers int    `json:"maxReceivers"`
+	Version      string `json:"version"` // empty on servers older than 2.1
 }
 
 func (s Server) ICE() []webrtc.ICEServer {

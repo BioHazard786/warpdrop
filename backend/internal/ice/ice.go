@@ -24,6 +24,7 @@ type Config struct {
 	ICEServers   []Server `json:"iceServers"`
 	Relay        bool     `json:"relay"`
 	MaxReceivers int      `json:"maxReceivers"`
+	Version      string   `json:"version,omitempty"` // the server build, set by the caller
 }
 
 // TURNCredential implements coturn's REST scheme: username = expiry:rand, password = base64(HMAC-SHA1(secret, username)).

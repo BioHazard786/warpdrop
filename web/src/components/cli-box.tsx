@@ -17,7 +17,7 @@ export function CliBox({
 }) {
   return (
     <CodeBlock size="sm">
-      <CodeBlockContent>
+      <CodeBlockContent className="no-scrollbar!">
         <CodeBlockLine>
           {prompt && <span className="text-muted-foreground select-none">$ </span>}
           {command}

@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/turn/v5",
+  "name": "github.com/pion/turn/v5",
+  "artifactVersion": "5.1.3",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/turn/v5",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_turn_v5"
+  ]
+}

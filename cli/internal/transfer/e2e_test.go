@@ -137,7 +137,7 @@ func receive(t *testing.T, cfg config.Config, s *sent, dir string, hooks Receive
 	}
 	defer sink.Close()
 	if hooks.OnOffer == nil {
-		hooks.OnOffer = func([]protocol.NamedFile) bool { return true }
+		hooks.OnOffer = func(string, []protocol.NamedFile) bool { return true }
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -204,7 +204,7 @@ func TestWrongSecretIsReportedAndNothingIsWritten(t *testing.T) {
 	s := startSender(t, cfg, []protocol.Source{source(0, "x", pattern(10, 0))})
 	s.secret = "wrong-wrong-wrong-wrong"
 	dir := t.TempDir()
-	err := receive(t, cfg, s, dir, ReceiveHooks{OnOffer: func([]protocol.NamedFile) bool { t.Error("must not be offered"); return true }})
+	err := receive(t, cfg, s, dir, ReceiveHooks{OnOffer: func(string, []protocol.NamedFile) bool { t.Error("must not be offered"); return true }})
 	if err != ErrWrongSecret {
 		t.Fatalf("got %v", err)
 	}
@@ -229,7 +229,7 @@ func TestDeclinedByUser(t *testing.T) {
 	cfg := config.Config{Server: serverURL, ForceRelay: true}
 	s := startSender(t, cfg, []protocol.Source{source(0, "x", pattern(10, 0))})
 	dir := t.TempDir()
-	err := receive(t, cfg, s, dir, ReceiveHooks{OnOffer: func([]protocol.NamedFile) bool { return false }})
+	err := receive(t, cfg, s, dir, ReceiveHooks{OnOffer: func(string, []protocol.NamedFile) bool { return false }})
 	if err == nil {
 		t.Fatal("decline must be an error exit")
 	}

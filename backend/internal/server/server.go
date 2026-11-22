@@ -20,9 +20,15 @@ import (
 	"github.com/BioHazard786/Warpdrop/backend/internal/ratelimit"
 	"github.com/BioHazard786/Warpdrop/backend/internal/relay"
 	"github.com/BioHazard786/Warpdrop/backend/internal/signaling"
+	"github.com/BioHazard786/Warpdrop/backend/internal/version"
 )
 
-const maxConnsPerIP = 20
+const (
+	maxConnsPerIP = 20
+	// The nearby list holds one idle socket per open tab for as long as the tab is open, so it has its own pool:
+	// otherwise a household or office behind one address would use up the transfer cap just by having tabs open.
+	maxLobbyConnsPerIP = 100
+)
 
 const csp = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; " +
@@ -33,13 +39,14 @@ type Server struct {
 	hub   *signaling.Hub
 	relay *relay.Relay
 	conns *ratelimit.Conns
+	lobby *ratelimit.Conns // /ws?lobby=1
 	up    websocket.Upgrader
 	spa   fs.FS
 }
 
 // New builds the handler. spa may be nil (API only).
 func New(cfg config.Config, spa fs.FS) (*Server, http.Handler) {
-	s := &Server{cfg: cfg, conns: ratelimit.NewConns(maxConnsPerIP), spa: spa}
+	s := &Server{cfg: cfg, conns: ratelimit.NewConns(maxConnsPerIP), lobby: ratelimit.NewConns(maxLobbyConnsPerIP), spa: spa}
 	s.up = websocket.Upgrader{ReadBufferSize: 32 << 10, WriteBufferSize: 32 << 10, CheckOrigin: s.checkOrigin}
 	var tickets signaling.Tickets
 	if cfg.RelayEnabled {
@@ -53,6 +60,8 @@ func New(cfg config.Config, spa fs.FS) (*Server, http.Handler) {
 		s.hub.Create = ratelimit.NewIP(10*k, max(1, int(5*k)))
 		s.hub.Join = ratelimit.NewIP(30*k, max(1, int(10*k)))
 		s.hub.Relay = ratelimit.NewIP(30*k, max(1, int(10*k)))
+		s.hub.Invite = ratelimit.NewIP(30*k, max(1, int(10*k)))
+		s.hub.Lobby = ratelimit.NewIP(60*k, max(1, int(20*k)))
 	}
 
 	mux := http.NewServeMux()
@@ -61,6 +70,7 @@ func New(cfg config.Config, spa fs.FS) (*Server, http.Handler) {
 		mux.HandleFunc("GET /relay/{ticket}", s.relay.Handler)
 	}
 	mux.HandleFunc("GET /api/config", s.serveConfig)
+	mux.HandleFunc("GET /.well-known/assetlinks.json", s.serveAssetLinks)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /", s.serveSPA)
 	return s, mux
@@ -76,7 +86,7 @@ func (s *Server) Janitor(stop <-chan struct{}) {
 	for {
 		select {
 		case <-t.C:
-			for _, l := range []*ratelimit.IP{s.hub.Create, s.hub.Join, s.hub.Relay} {
+			for _, l := range []*ratelimit.IP{s.hub.Create, s.hub.Join, s.hub.Relay, s.hub.Invite, s.hub.Lobby} {
 				l.Sweep(10 * time.Minute)
 			}
 		case <-stop:
@@ -147,27 +157,52 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) string {
 
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	ip := ClientIP(r, s.cfg.TrustedProxies)
-	if !s.conns.Acquire(ip) {
-		slog.Warn("too many connections", "ip", ip, "max", maxConnsPerIP)
+	pool, max, lobby := s.conns, maxConnsPerIP, r.URL.Query().Get("lobby") == "1"
+	if lobby {
+		pool, max = s.lobby, maxLobbyConnsPerIP
+	}
+	if !pool.Acquire(ip) {
+		slog.Warn("too many connections", "ip", ip, "max", max, "lobby", lobby)
 		http.Error(w, "too many connections", http.StatusTooManyRequests)
 		return
 	}
-	defer s.conns.Release(ip)
+	defer pool.Release(ip)
 	conn, err := s.up.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Debug("ws upgrade failed", "ip", ip, "err", err) // Upgrade already wrote the response
 		return
 	}
-	signaling.NewClient(s.hub, conn, ip).Serve()
+	c := signaling.NewClient(s.hub, conn, ip)
+	c.LobbyOnly = lobby
+	c.Serve()
 }
 
 func (s *Server) serveConfig(w http.ResponseWriter, _ *http.Request) {
 	c := ice.Build(s.cfg.STUNURLs, s.cfg.TURNURLs, s.cfg.TURNSecret, s.relay != nil, signaling.MaxReceivers, time.Now())
+	c.Version = version.Version
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(c); err != nil {
 		slog.Warn("config encode failed", "err", err)
 	}
+}
+
+// serveAssetLinks lets Android verify that this domain's /r/ links belong to the app (Digital Asset Links).
+func (s *Server) serveAssetLinks(w http.ResponseWriter, r *http.Request) {
+	if len(s.cfg.AndroidCertSHA256) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_ = json.NewEncoder(w).Encode([]any{map[string]any{
+		"relation": []string{"delegate_permission/common.handle_all_urls"},
+		"target": map[string]any{
+			"namespace":                "android_app",
+			"package_name":             s.cfg.AndroidPackage,
+			"sha256_cert_fingerprints": s.cfg.AndroidCertSHA256,
+		},
+	}})
 }
 
 func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request) {

@@ -171,6 +171,9 @@ func TestTransfersZeroByteDuplicateAndMultiChunk(t *testing.T) {
 	if !bytes.Equal(x.sink.bytes(0), a) || !bytes.Equal(x.sink.bytes(1), b) || len(x.sink.bytes(2)) != 0 {
 		t.Fatal("received bytes differ")
 	}
+	if x.state.Sender != "s" {
+		t.Fatalf("sender name %q, want the sender's hello device", x.state.Sender)
+	}
 	if len(x.sink.closed) != 3 {
 		t.Fatalf("closed %v", x.sink.closed)
 	}
@@ -416,4 +419,16 @@ func TestFastReceiverDoneNeverOvertakesStreamed(t *testing.T) {
 		OnOffer: func([]NamedFile) bool { return true }})
 	expect(t, r, StatusDone, "", false)
 	expect(t, wait(t, sRes), StatusDone, "", false)
+}
+
+func TestSenderNameIsCleanedForDisplay(t *testing.T) {
+	if got := senderName(""); got != "sender" {
+		t.Fatalf("empty name: %q", got)
+	}
+	if got := []rune(senderName(strings.Repeat("é", 100))); len(got) != 64 {
+		t.Fatalf("long name kept %d runes, want 64", len(got))
+	}
+	if got := senderName("evil\x1b[2Jname"); strings.ContainsRune(got, 0x1b) {
+		t.Fatalf("escape survived: %q", got)
+	}
 }

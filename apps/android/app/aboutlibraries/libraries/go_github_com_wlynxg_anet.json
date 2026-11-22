@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/wlynxg/anet",
+  "name": "github.com/wlynxg/anet",
+  "artifactVersion": "0.0.5",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/wlynxg/anet",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_wlynxg_anet"
+  ]
+}

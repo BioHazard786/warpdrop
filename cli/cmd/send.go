@@ -3,11 +3,14 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/BioHazard786/Warpdrop/cli/internal/files"
+	"github.com/BioHazard786/Warpdrop/cli/internal/lan"
+	"github.com/BioHazard786/Warpdrop/cli/internal/nearby"
 	"github.com/BioHazard786/Warpdrop/cli/internal/protocol"
 	"github.com/BioHazard786/Warpdrop/cli/internal/transfer"
 	"github.com/BioHazard786/Warpdrop/cli/internal/ui"
@@ -16,7 +19,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var flagKeepOpen bool
+var (
+	flagKeepOpen   bool
+	flagSendNearby bool
+	flagTo         string
+)
 
 var sendCmd = &cobra.Command{
 	Use:     "send <files...>",
@@ -28,7 +35,9 @@ web app or "warpdrop receive". The words after the number never reach the server
 Examples:
   warpdrop send report.pdf photo.jpg
   warpdrop send --keep-open big.iso     # serve several receivers
-  warpdrop send --relay file.zip        # force the encrypted relay`,
+  warpdrop send --relay file.zip        # force the encrypted relay
+  warpdrop send --nearby photo.jpg      # pick a device on this network, no code needed
+  warpdrop send --to phone photo.jpg    # same, by name`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error { return runSend(cmd.Context(), args) },
 }
@@ -64,15 +73,52 @@ func runSend(ctx context.Context, paths []string) error {
 	if err != nil {
 		return err
 	}
+	nearbyMode := flagSendNearby || flagTo != ""
 	stop := ui.RunConnectionSpinner("Connecting to server...")
 	srv, err := cfg.Fetch(ctx)
 	stop()
+	online := err == nil
 	if err != nil {
-		return err
+		if !nearbyMode {
+			return err
+		}
+		ui.PrintWarningf("Server unreachable: looking on the local network only")
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// nearby: choose a device from this network. One on the local network is sent to directly; one only in the
+	// server's list gets an invite to our room.
+	var invite func(roomID, token string) error
+	var direct net.Conn
+	var to nearby.Device
+	if nearbyMode {
+		f, err := startFinder(runCtx, cfg, online, lan.NewID())
+		if err != nil {
+			return err
+		}
+		if f.lobby != nil {
+			defer f.lobby.Close()
+		}
+		if to, err = pickDevice(runCtx, f, flagTo); err != nil {
+			return err
+		}
+		if to.LAN != nil {
+			var derr error
+			if direct, derr = lan.Dial(runCtx, *to.LAN); derr != nil {
+				if !to.InLobby() || f.lobby == nil {
+					return derr
+				}
+				ui.PrintWarningf("%v: using the server instead", derr)
+			}
+		}
+		if direct == nil {
+			lobby := f.lobby
+			invite = func(roomID, token string) error { return lobby.Invite(to.ID, roomID, token) }
+		}
+		ui.PrintInfof("Sending to %s", to.Name)
+	}
 	m := &meter{}
 	go m.Run(runCtx)
 
@@ -82,8 +128,11 @@ func runSend(ctx context.Context, paths []string) error {
 		seen      = map[string]string{} // peer -> last printed status
 		code      string
 	)
-	err = transfer.RunSend(runCtx, cfg, srv, srcs, deviceName(), transfer.SendHooks{
+	hooks := transfer.SendHooks{
 		OnRoom: func(room, secret string) {
+			if secret == "" { // nearby: no code to share
+				return
+			}
 			code = room + "-" + secret
 			fmt.Println()
 			ui.RenderRoomInfo(code, cfg.ShareLink(room, secret))
@@ -104,12 +153,16 @@ func runSend(ctx context.Context, paths []string) error {
 			}
 			seen[v.ID] = key
 			m.Clear()
-			via := map[string]string{"rtc": "direct", "relay": "relay", "": ""}[v.Transport]
+			via := map[string]string{"rtc": "direct", "relay": "relay", "lan": "local network", "": ""}[v.Transport]
 			switch v.Status {
 			case "authenticating":
 				ui.PrintInfof("%s connected (%s), verifying...", v.Device, via)
 			case "waiting":
-				ui.PrintInfof("Waiting for %s to accept...", v.Device)
+				if v.SAS != "" {
+					ui.PrintInfof("Waiting for %s to accept. Code %s must match on both screens", v.Device, fmtSAS(v.SAS))
+				} else {
+					ui.PrintInfof("Waiting for %s to accept...", v.Device)
+				}
 			case "done":
 				delivered = true
 				ui.PrintSuccessf("Delivered %d file(s), %s, to %s", len(srcs), utils.FormatSize(v.Total), v.Device)
@@ -121,7 +174,15 @@ func runSend(ctx context.Context, paths []string) error {
 			}
 		},
 		OnPeerGone: func(id string) { mu.Lock(); delete(seen, id); mu.Unlock() },
-	})
+	}
+	switch {
+	case direct != nil:
+		err = transfer.RunSendLAN(runCtx, direct, to.Name, srcs, deviceName(), hooks)
+	case invite != nil:
+		err = transfer.RunSendNearby(runCtx, cfg, srv, srcs, deviceName(), hooks, invite)
+	default:
+		err = transfer.RunSend(runCtx, cfg, srv, srcs, deviceName(), hooks)
+	}
 	m.Clear()
 	_ = code
 	if err != nil {
@@ -137,5 +198,7 @@ func runSend(ctx context.Context, paths []string) error {
 
 func init() {
 	rootCmd.AddCommand(sendCmd)
+	sendCmd.Flags().BoolVarP(&flagSendNearby, "nearby", "n", false, "Pick a device on this network instead of sharing a code")
+	sendCmd.Flags().StringVar(&flagTo, "to", "", "Send to the nearby device with this name (implies --nearby)")
 	sendCmd.Flags().BoolVarP(&flagKeepOpen, "keep-open", "k", false, "Keep serving after the first delivery (up to 10 receivers)")
 }

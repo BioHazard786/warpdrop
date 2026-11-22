@@ -25,6 +25,9 @@ jobs:
             context: .
     steps:
       - uses: actions/checkout@v7
+      - name: The tag must match the VERSION file
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: '[ "${GITHUB_REF_NAME#v}" = "$(cat VERSION)" ] || { echo "::error::tag $GITHUB_REF_NAME does not match VERSION $(cat VERSION)"; exit 1; }'
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
@@ -46,6 +49,7 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
+          build-args: VERSION=${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'dev' }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -60,6 +64,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+      - name: The tag must match the VERSION file
+        run: '[ "${GITHUB_REF_NAME#v}" = "$(cat VERSION)" ] || { echo "::error::tag $GITHUB_REF_NAME does not match VERSION $(cat VERSION)"; exit 1; }'
         with:
           fetch-depth: 0 # goreleaser builds the changelog from history
       - uses: actions/setup-go@v7
@@ -74,3 +80,112 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # the scoop bucket and homebrew tap live in other repositories; the default token cannot push there
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+
+  # The jobs below attach their files to the release goreleaser creates, hence `needs: cli-release`.
+  # One version for everything: the tag v2.1.0 builds the CLI, the server image, the Android APKs and the desktop apps.
+  # Secrets for Android: ANDROID_KEYSTORE_BASE64, ANDROID_STORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.
+  android:
+    needs: cli-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-37.2" "ndk;30.0.16248370"
+      - run: go install golang.org/x/mobile/cmd/gomobile@latest
+      - run: make core NDK="$ANDROID_HOME/ndk/30.0.16248370"
+        working-directory: apps/android
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          build-root-directory: apps/android
+      - name: Build the signed APKs (one per ABI) and upload them
+        env:
+          WARPDROP_STOREPASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          WARPDROP_KEYALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          WARPDROP_KEYPASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          printf '%s' "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/keystore.jks"
+          export WARPDROP_STOREFILE="$RUNNER_TEMP/keystore.jks"
+          ./gradlew :app:testDebugUnitTest :app:assembleRelease --console=plain
+          cd app/build/outputs/apk/release
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          for f in app-*-release.apk; do
+            "$APKSIGNER" verify "$f"
+            abi=${f#app-}; abi=${abi%-release.apk}
+            mv "$f" "warpdrop-${GITHUB_REF_NAME}-android-$abi.apk"
+          done
+          gh release upload "$GITHUB_REF_NAME" warpdrop-*.apk --clobber --repo "$GITHUB_REPOSITORY"
+        working-directory: apps/android
+
+  desktop-linux:
+    needs: cli-release
+    runs-on: ubuntu-latest # 24.04: has GTK 4 and WebKitGTK 6.0, which the app and its packages target
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GIT_COMMITTER_NAME: Warp Labs # nfpm's maintainer field
+      GIT_COMMITTER_EMAIL: noreply@warplabs.info
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/desktop/go.mod
+          cache-dependency-path: |
+            apps/desktop/go.sum
+            cli/go.sum
+      - uses: oven-sh/setup-bun@v2
+      - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - run: bun install --frozen-lockfile # the UI imports the web app's components and fonts
+        working-directory: web
+      - run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
+      - name: Build .deb and .rpm
+        run: |
+          export VERSION="$(cat ../../VERSION)" # compiled into the app (tray menu) via -ldflags
+          sed -i "s/^version: .*/version: \"$VERSION\"/" build/linux/nfpm/nfpm.yaml
+          wails3 task linux:create:deb
+          wails3 task linux:create:rpm
+          gh release upload "$GITHUB_REF_NAME" bin/*.deb bin/*.rpm --clobber --repo "$GITHUB_REPOSITORY"
+        working-directory: apps/desktop
+
+  desktop-windows:
+    needs: cli-release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/desktop/go.mod
+          cache-dependency-path: |
+            apps/desktop/go.sum
+            cli/go.sum
+      - uses: oven-sh/setup-bun@v2
+      - run: choco install nsis -y --no-progress && echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
+      - run: bun install --frozen-lockfile
+        working-directory: web
+      - run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
+      - name: Build the installer
+        run: |
+          export VERSION="$(cat ../../VERSION)"
+          wails3 task windows:create:nsis:installer
+          mv bin/warpdrop-desktop-amd64-installer.exe "bin/warpdrop-${GITHUB_REF_NAME}-windows-amd64-setup.exe"
+          gh release upload "$GITHUB_REF_NAME" bin/*-setup.exe --clobber --repo "$GITHUB_REPOSITORY"
+        working-directory: apps/desktop

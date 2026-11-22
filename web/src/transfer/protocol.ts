@@ -43,8 +43,11 @@ export const frameSchema = z.discriminatedUnion("t", [
     v: z.number().int(),
     client: z.string().max(64),
     device: z.string().max(128),
-    pub: hex(64),
+    // a nearby sender sends `commit` (hex of SHA-256 of its key) instead of `pub`, and reveals the key later
+    pub: z.string().regex(/^([0-9a-f]{64})?$/),
+    commit: hex(64).optional(),
   }),
+  z.object({ t: z.literal("reveal"), pub: hex(64) }),
   z.object({ t: z.literal("auth"), mac: hex(64) }),
   z.object({
     t: z.literal("manifest"),
@@ -69,6 +72,8 @@ export function parseFrame(text: string): Frame | null {
   }
   const r = frameSchema.safeParse(raw)
   if (!r.success) return null
+  // a hello carries exactly one of a key or a commitment to one
+  if (r.data.t === "hello" && (r.data.pub === "") === (r.data.commit === undefined)) return null
   if (
     r.data.t === "manifest" &&
     new Set(r.data.files.map((f) => f.id)).size !== r.data.files.length

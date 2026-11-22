@@ -60,6 +60,7 @@ All optional. Set them in `.env` (compose passes them to the container).
 | `ALLOWED_ORIGINS` | empty | Extra browser origins allowed to open `/ws`, comma separated. The site's own host is always allowed. The CLI sends no origin and is always allowed. |
 | `TRUSTED_PROXIES` | `127.0.0.1,172.16.0.0/12` | Peers whose `X-Forwarded-For` is trusted, so rate limits see the real client IP. The default covers a host proxy reaching the container through Docker's bridge. **Set this to your proxy's address if it isn't on this host.** |
 | `RATE_LIMIT_SCALE` | `1` | Multiplies the per-IP limits (below). Raise it when many people share one address. |
+| `ANDROID_CERT_SHA256`, `ANDROID_PACKAGE` | empty, `com.biohazard786.warpdrop` | Only if you publish your own build of the Android app: its signing-certificate SHA-256 fingerprint(s), comma separated. The server then serves `/.well-known/assetlinks.json` so your share links open the app instead of the browser. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
 | `LOG_FORMAT` | `json` | `json` for production, `text` for plain key=value lines, `color` for tinted local output (no colors when not a terminal). |
 | `STUN_URLS` | Google STUN | STUN servers, comma separated. |
@@ -70,6 +71,8 @@ All optional. Set them in `.env` (compose passes them to the container).
 Per client IP: **10 new rooms per minute (burst 5)**, 30 joins per minute (burst 10), 30 relay requests per minute (burst 10), and 20 simultaneous connections. They exist so room numbers can't be guessed or the server flooded. If an office, school or carrier-grade NAT puts hundreds of users behind one address, they share these limits: set `RATE_LIMIT_SCALE=5` (or more).
 
 Behind a proxy, rate limiting is only per real user if `TRUSTED_PROXIES` is correct. If it is wrong, everyone appears to come from the proxy's address and shares one limit.
+
+**The Nearby list depends on this too.** It groups browsers and apps by public IP, and treats private addresses as one shared "home network". If `TRUSTED_PROXIES` doesn't match your proxy, every visitor looks like the proxy's private address and **strangers will see each other in the Nearby list** (up to 50 per list). Check it after deploying: open the site from two networks (for example Wi-Fi and a phone on mobile data) and confirm they do not list each other. Nearby sockets use `/ws?lobby=1`, the same path as signaling, so no proxy change is needed.
 
 ## 4. TURN (optional)
 

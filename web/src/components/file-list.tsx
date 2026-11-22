@@ -98,7 +98,7 @@ export function FileList({
         </AttachmentGroup>
       )}
       {docs.length > 0 && (
-        <div className="scroll-fade-y scrollbar-none max-h-72 overflow-y-auto">
+        <div className="scroll-fade-y no-scrollbar max-h-72 overflow-y-auto">
           <div className="flex flex-col gap-2">
             {docs.map(({ f, i, s }) => (
               <Attachment key={i} state={s} className="w-full" title={f.title ?? f.name}>

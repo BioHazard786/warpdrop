@@ -12,6 +12,7 @@ type vectors struct {
 	RoomID, Secret, RootKey, AuthKey, SessionKey string
 	SenderFingerprint, ReceiverFingerprint       string
 	TranscriptRtc, TranscriptRelay               string
+	Nearby                                       struct{ RoomID, RootKey, AuthKey, SessionKey, Commit, Transcript, Sas string }
 	Macs                                         struct{ Rtc, Relay struct{ Recv, Send string } }
 	RelayFrames                                  []struct {
 		Dir     uint32
@@ -30,6 +31,27 @@ func hx(t *testing.T, s string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func TestNearbyVectorsMatchNodeAndWebCrypto(t *testing.T) {
+	var v vectors
+	fixture(t, "crypto-vectors", &v)
+	s, _ := EphemeralFromSeed(hx(t, v.X25519.SenderSeed))
+	r, _ := EphemeralFromSeed(hx(t, v.X25519.ReceiverSeed))
+	n := v.Nearby
+	ks, err := DeriveKeys("", n.RoomID, s, r.Public()) // nearby mode: an empty secret
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(ks.Root) != n.RootKey || hex.EncodeToString(ks.Auth) != n.AuthKey || hex.EncodeToString(ks.Session) != n.SessionKey {
+		t.Fatal("nearby keys differ from vectors")
+	}
+	if Commit(s.Public()) != n.Commit {
+		t.Fatal("commit differs")
+	}
+	if got := SAS(ks.Auth, hx(t, n.Transcript)); got != n.Sas {
+		t.Fatalf("sas %s, want %s", got, n.Sas)
+	}
 }
 
 func TestCryptoVectorsMatchNodeAndWebCrypto(t *testing.T) {

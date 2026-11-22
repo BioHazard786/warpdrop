@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/webrtc/v4",
+  "name": "github.com/pion/webrtc/v4",
+  "artifactVersion": "4.2.26",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/webrtc/v4",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_webrtc_v4"
+  ]
+}

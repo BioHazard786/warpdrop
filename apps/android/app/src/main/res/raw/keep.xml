@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AGP 9's optimized resource shrinking would drop the generated AboutLibraries data -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@raw/aboutlibraries" />

@@ -26,10 +26,14 @@ type Client struct {
 	out  chan []byte
 	done chan struct{}
 	once sync.Once
+	// LobbyOnly marks a /ws?lobby=1 socket: it may only send nearby_* messages, and every other socket may not.
+	// That keeps lobby sockets, which are counted in a separate pool, from being used to run transfers.
+	LobbyOnly bool
 
 	// guarded by hub.mu
 	room   *Room
 	peerID string
+	lobby  *nearbyPeer
 }
 
 func NewClient(h *Hub, conn *websocket.Conn, ip string) *Client {

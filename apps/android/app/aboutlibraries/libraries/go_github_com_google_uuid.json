@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/google/uuid",
+  "name": "github.com/google/uuid",
+  "artifactVersion": "1.6.0",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/google/uuid",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_google_uuid"
+  ]
+}

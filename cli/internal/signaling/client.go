@@ -19,9 +19,13 @@ type Message struct {
 	Ticket  string          `json:"ticket"`
 	Code    string          `json:"code"`
 	Message string          `json:"message"`
+	Reason  string          `json:"reason"` // invite_declined: "declined" or "busy"
 	Peers   []string        `json:"peers"`
 	Client  json.RawMessage `json:"client"`
 	Payload json.RawMessage `json:"payload"`
+	// nearby lobby: the full device list, or the one device an event is about
+	Devices json.RawMessage `json:"devices"`
+	Peer    json.RawMessage `json:"peer"`
 }
 
 // Client delivers messages on In, which is closed when the connection ends.

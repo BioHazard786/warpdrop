@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/sdp/v3",
+  "name": "github.com/pion/sdp/v3",
+  "artifactVersion": "3.0.20",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/sdp/v3",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_sdp_v3"
+  ]
+}

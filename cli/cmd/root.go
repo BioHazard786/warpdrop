@@ -49,9 +49,15 @@ func Execute() {
 	}
 }
 
-func loadConfig() (config.Config, error) { return config.Resolve(flagServer, flagRelay) }
+func loadConfig() (config.Config, error) {
+	server, _, err := config.Pick(flagServer)
+	if err != nil {
+		return config.Config{}, err
+	}
+	return config.Resolve(server, flagRelay)
+}
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&flagServer, "server", "", "WarpDrop server (default $WARPDROP_SERVER or "+config.DefaultServer+")")
+	rootCmd.PersistentFlags().StringVar(&flagServer, "server", "", "WarpDrop server (default: $WARPDROP_SERVER, else the saved one, else "+config.DefaultServer+")")
 	rootCmd.PersistentFlags().BoolVarP(&flagRelay, "relay", "r", false, "Skip WebRTC and use the encrypted relay")
 }

@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/ice/v4",
+  "name": "github.com/pion/ice/v4",
+  "artifactVersion": "4.4.8",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/ice/v4",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_ice_v4"
+  ]
+}

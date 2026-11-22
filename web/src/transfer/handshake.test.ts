@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest"
 import { xxhash64 } from "hash-wasm"
 import {
   FrameCipher,
+  commit,
+  sas,
   concat,
   deriveKeys,
   ephemeralFromSeed,
@@ -31,6 +33,21 @@ describe("crypto vectors (shared with the Go CLI)", () => {
       expect(toHex(k.authKey)).toBe(v.authKey)
       expect(toHex(k.sessionKey)).toBe(v.sessionKey)
     }
+  })
+
+  it("derives the nearby (empty-secret) keys, commitment and code", async () => {
+    const n = v.nearby
+    const s = await ephemeralFromSeed(fromHex(v.x25519.senderSeed))
+    const r = await ephemeralFromSeed(fromHex(v.x25519.receiverSeed))
+    const ks = await deriveKeys("", n.roomId, s, r.pub)
+    const kr = await deriveKeys("", n.roomId, r, s.pub)
+    for (const k of [ks, kr]) {
+      expect(toHex(k.rootKey)).toBe(n.rootKey)
+      expect(toHex(k.authKey)).toBe(n.authKey)
+      expect(toHex(k.sessionKey)).toBe(n.sessionKey)
+    }
+    expect(await commit(s.pub)).toBe(n.commit)
+    expect(await sas(ks.authKey, fromHex(n.transcript))).toBe(n.sas)
   })
 
   it("builds transcripts and MACs", async () => {

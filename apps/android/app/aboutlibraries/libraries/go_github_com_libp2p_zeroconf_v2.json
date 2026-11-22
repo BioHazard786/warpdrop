@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/libp2p/zeroconf/v2",
+  "name": "github.com/libp2p/zeroconf/v2",
+  "artifactVersion": "2.2.0",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/libp2p/zeroconf/v2",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_libp2p_zeroconf_v2"
+  ]
+}

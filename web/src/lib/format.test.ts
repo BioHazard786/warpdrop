@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { SpeedMeter, formatBytes, formatETA } from "./format"
+import { SpeedMeter, formatBytes, formatETA, splitDevice } from "./format"
 
 describe("format", () => {
   it("formats bytes without overflowing the unit table or choking on bad input", () => {
@@ -36,5 +36,15 @@ describe("format", () => {
     expect(m.sample(1_000_000, 2500)).toBeCloseTo(1_000_000) // brief gap: hold
     expect(m.sample(1_000_000, 4500)).toBe(0)
     expect(m.eta(1_000_000)).toBe(0) // rendered as "--"
+  })
+
+  it("splits device labels into a title and a detail line", () => {
+    expect(splitDevice("Chrome 156 on Linux")).toEqual({ title: "Chrome 156", detail: "Linux" })
+    expect(splitDevice("Brave (Chromium 131) on macOS")).toEqual({
+      title: "Brave",
+      detail: "macOS",
+    })
+    expect(splitDevice("devbox (CLI v1.2.0)")).toEqual({ title: "devbox", detail: "CLI v1.2.0" })
+    expect(splitDevice("Browser")).toEqual({ title: "Browser", detail: "" })
   })
 })

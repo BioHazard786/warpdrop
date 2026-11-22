@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { toast } from "@/components/ui/toast"
 import { newFiles } from "@/lib/files"
+import { peerFor } from "@/lib/nearby-status"
 import { SpeedMeter } from "@/lib/format"
 import { type PeerView, SenderRoom, type SenderEvent } from "@/transfer/sender"
 
@@ -9,14 +10,36 @@ export interface PeerRow extends PeerView {
   eta: number
 }
 
+/** A nearby device this room invited, and what became of the invite before (or instead of) it joining. */
+export interface SentInvite {
+  device: { id: string; name: string }
+  /** Peer ids that came through earlier invites to this device: its tile follows only a newer one. */
+  stale: string[]
+  state: "pending" | "declined" | "busy" | "timeout" | "failed" | "cancelled"
+}
+
+/** How long an invite may go unanswered before its tile says "No response". */
+export const INVITE_TIMEOUT_MS = 60_000
+
 interface SendState {
   phase: "idle" | "starting" | "ready" | "reconnecting" | "closed" | "error"
   error?: string
   files: { name: string; size: number; type: string; preview?: string }[]
   roomId: string
   secret: string
+  /** "nearby": sent to devices picked from the same-network list, no code. */
+  mode: "link" | "nearby"
+  /** Nearby only, by device id. */
+  invites: Record<string, SentInvite>
   peers: PeerRow[]
-  start(files: File[]): void
+  start(files: File[], nearby?: boolean): void
+  /** Nearby: invite one more device into the room; `send` delivers it through the lobby. */
+  invite(
+    device: { id: string; name: string },
+    send: (roomId: string, token: string) => boolean,
+  ): void
+  /** Nearby: stop waiting on an invite nobody has answered yet. */
+  cancelInvite(deviceId: string): void
   stop(): void
   addFiles(files: File[]): void
   removeFile(file: { name: string; size: number }): void
@@ -37,6 +60,11 @@ let list: File[] = [] // the File objects behind state.files, same order
 const meters = new Map<string, SpeedMeter>()
 let pending = new Map<string, PeerView>()
 let timer: ReturnType<typeof setTimeout> | null = null
+const inviteTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const clearInviteTimers = () => {
+  for (const t of inviteTimers.values()) clearTimeout(t)
+  inviteTimers.clear()
+}
 
 export const useSend = create<SendState>((set, get) => {
   const flush = () => {
@@ -83,7 +111,25 @@ export const useSend = create<SendState>((set, get) => {
         meters.delete(e.id)
         set((s) => ({ peers: s.peers.filter((p) => p.id !== e.id) }))
         break
+      case "declined":
+        setInvite(e.deviceId, e.reason)
+        break
     }
+  }
+
+  const setInvite = (id: string, state: SentInvite["state"]) => {
+    const inv = get().invites[id]
+    if (!inv || inv.state !== "pending") return
+    clearTimeout(inviteTimers.get(id))
+    inviteTimers.delete(id)
+    if (state === "declined" || state === "busy")
+      toast.add({
+        type: "info",
+        title: state === "busy" ? `${inv.device.name} is busy` : `${inv.device.name} declined`,
+        description:
+          state === "busy" ? "They're in another transfer. Try again in a moment." : undefined,
+      })
+    set((s) => ({ invites: { ...s.invites, [id]: { ...inv, state } } }))
   }
 
   /** Apply a new file list. Previews are only made or revoked once the room accepts it. */
@@ -106,20 +152,25 @@ export const useSend = create<SendState>((set, get) => {
     files: [],
     roomId: "",
     secret: "",
+    mode: "link",
+    invites: {},
     peers: [],
-    start(files) {
+    start(files, nearby) {
       revoke(get().files)
       const old = room
       room = null
       old?.stop()
       pending = new Map()
       meters.clear()
+      clearInviteTimers()
       set({
         phase: "starting",
         error: undefined,
         peers: [],
         roomId: "",
         secret: "",
+        mode: nearby ? "nearby" : "link",
+        invites: {},
         files: files.map((f) => ({
           name: f.name,
           size: f.size,
@@ -128,7 +179,7 @@ export const useSend = create<SendState>((set, get) => {
         })),
       })
       list = files
-      room = new SenderRoom(files, onEvent)
+      room = new SenderRoom(files, onEvent, nearby)
       void room.start().catch((err) =>
         onEvent({
           t: "status",
@@ -156,11 +207,34 @@ export const useSend = create<SendState>((set, get) => {
         [files[i]!],
       )
     },
+    invite(device, send) {
+      const r = room
+      if (!r || get().mode !== "nearby") return
+      const stale = get()
+        .peers.filter((p) => p.invited === device.id)
+        .map((p) => p.id)
+      set((s) => ({ invites: { ...s.invites, [device.id]: { device, stale, state: "pending" } } }))
+      clearTimeout(inviteTimers.get(device.id))
+      inviteTimers.set(
+        device.id,
+        setTimeout(() => {
+          const inv = get().invites[device.id]
+          if (inv && !peerFor(inv, get().peers)) setInvite(device.id, "timeout")
+        }, INVITE_TIMEOUT_MS),
+      )
+      r.invite((roomId, token) => {
+        const ok = room === r && send(roomId, token)
+        if (!ok) setInvite(device.id, "failed")
+        return ok
+      })
+    },
+    cancelInvite: (id) => setInvite(id, "cancelled"),
     cancelPeer: (id) => room?.cancelPeer(id),
     stop() {
       const old = room
       room = null
       old?.stop()
+      clearInviteTimers()
       set({ phase: "closed" })
     },
     reset() {
@@ -168,7 +242,17 @@ export const useSend = create<SendState>((set, get) => {
       const old = room
       room = null
       old?.stop()
-      set({ phase: "idle", files: [], peers: [], roomId: "", secret: "", error: undefined })
+      clearInviteTimers()
+      set({
+        phase: "idle",
+        files: [],
+        peers: [],
+        roomId: "",
+        secret: "",
+        mode: "link",
+        invites: {},
+        error: undefined,
+      })
     },
   }
 })

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,10 +47,16 @@ func failed(reason Reason, byPeer bool) Result {
 
 const clientName = "cli/2"
 
-// handshake runs the hello/auth exchange. It returns nil on success or the Result to end with.
-func handshake(ctx context.Context, role Role, t Transport, roomID, secret, device string) *Result {
+// handshake runs the hello/auth exchange. On success it returns the peer's device name (its own label, not
+// covered by the MAC), the nearby code ("" unless secret is empty) and a nil Result; otherwise the Result to end with.
+//
+// An empty secret means nearby mode: there are no shared words, so the sender commits to its key first and the
+// users compare the returned SAS instead. The receiver must not reveal its key before it has seen the commit.
+func handshake(ctx context.Context, role Role, t Transport, roomID, secret, device string) (peer, sas string, res *Result) {
 	ctx, cancel := context.WithTimeout(ctx, HandshakeTimeout)
 	defer cancel()
+	nearby := secret == ""
+	fail := func(r Result) (string, string, *Result) { return "", "", &r }
 	next := func() (any, *Result) {
 		w, err := t.Recv(ctx)
 		if err != nil {
@@ -74,26 +81,67 @@ func handshake(ctx context.Context, role Role, t Transport, roomID, secret, devi
 		}
 		return f, nil
 	}
+	protoErr := func() (string, string, *Result) { return fail(failed(ReasonProtocolError, false)) }
 	eph, err := NewEphemeral()
 	if err != nil {
-		return &Result{Status: StatusFailed, Reason: ReasonProtocolError, Err: err}
+		return fail(Result{Status: StatusFailed, Reason: ReasonProtocolError, Err: err})
 	}
-	_ = t.SendText(Encode(NewHello(clientName, device, fmt.Sprintf("%x", eph.Public()))))
+	pubHex := fmt.Sprintf("%x", eph.Public())
 
-	f, res := next()
-	if res != nil {
-		return res
+	var hello Hello
+	var peerPub []byte
+	switch {
+	case nearby && role == RoleSender:
+		h := NewHello(clientName, device, "")
+		h.Commit = Commit(eph.Public())
+		_ = t.SendText(Encode(h))
+		f, r := next()
+		if r != nil {
+			return fail(*r)
+		}
+		var ok bool
+		if hello, ok = f.(Hello); !ok || hello.V != Version || hello.Commit != "" {
+			return protoErr()
+		}
+		_ = t.SendText(Encode(NewReveal(pubHex)))
+		peerPub, _ = hexDecode(hello.Pub)
+	case nearby:
+		f, r := next()
+		if r != nil {
+			return fail(*r)
+		}
+		var ok bool
+		if hello, ok = f.(Hello); !ok || hello.V != Version || hello.Commit == "" {
+			return protoErr()
+		}
+		_ = t.SendText(Encode(NewHello(clientName, device, pubHex))) // only now: the sender is already bound to its key
+		f, r = next()
+		if r != nil {
+			return fail(*r)
+		}
+		rev, ok := f.(Reveal)
+		if !ok {
+			return protoErr()
+		}
+		if peerPub, _ = hexDecode(rev.Pub); Commit(peerPub) != hello.Commit {
+			return protoErr()
+		}
+	default:
+		_ = t.SendText(Encode(NewHello(clientName, device, pubHex)))
+		f, r := next()
+		if r != nil {
+			return fail(*r)
+		}
+		var ok bool
+		if hello, ok = f.(Hello); !ok || hello.V != Version || hello.Commit != "" {
+			return protoErr()
+		}
+		peerPub, _ = hexDecode(hello.Pub)
 	}
-	hello, ok := f.(Hello)
-	if !ok || hello.V != Version {
-		r := failed(ReasonProtocolError, false)
-		return &r
-	}
-	peerPub, _ := hexDecode(hello.Pub)
+
 	keys, err := DeriveKeys(secret, roomID, eph, peerPub)
 	if err != nil {
-		r := failed(ReasonProtocolError, false)
-		return &r
+		return protoErr()
 	}
 	senderPub, receiverPub := eph.Public(), peerPub
 	senderFp, receiverFp := t.LocalFingerprint(), t.RemoteFingerprint()
@@ -106,14 +154,13 @@ func handshake(ctx context.Context, role Role, t Transport, roomID, secret, devi
 	if role == RoleReceiver {
 		_ = t.SendText(Encode(NewAuth(MAC(keys.Auth, "recv", tr))))
 	}
-	f, res = next()
-	if res != nil {
-		return res
+	f, r := next()
+	if r != nil {
+		return fail(*r)
 	}
 	auth, ok := f.(Auth)
 	if !ok {
-		r := failed(ReasonProtocolError, false)
-		return &r
+		return protoErr()
 	}
 	label := "send"
 	if role == RoleSender {
@@ -121,16 +168,18 @@ func handshake(ctx context.Context, role Role, t Transport, roomID, secret, devi
 	}
 	if !VerifyMAC(keys.Auth, label, tr, auth.Mac) {
 		_ = t.SendText(Encode(NewCancel(ReasonAuthFailed)))
-		r := failed(ReasonAuthFailed, false)
-		return &r
+		return fail(failed(ReasonAuthFailed, false))
 	}
 	if role == RoleSender {
 		_ = t.SendText(Encode(NewAuth(MAC(keys.Auth, "send", tr))))
 	}
 	if err := t.EnableCrypto(keys.Session, role); err != nil {
-		return &Result{Status: StatusFailed, Reason: ReasonProtocolError, Err: err}
+		return fail(Result{Status: StatusFailed, Reason: ReasonProtocolError, Err: err})
 	}
-	return nil
+	if nearby {
+		sas = SAS(keys.Auth, tr)
+	}
+	return hello.Device, sas, nil
 }
 
 // failHandshake tells the peer why (protocol errors only) and closes, so it never waits out the timeout.
@@ -156,7 +205,8 @@ type SenderOptions struct {
 	Files                  []Source
 	OnProgress             func(idx int, bytes int64)
 	OnFileDone             func(idx int)
-	OnOffered              func() // handshake passed and the file list is out: the receiver decides now
+	OnOffered              func()           // handshake passed and the file list is out: the receiver decides now
+	OnSAS                  func(sas string) // nearby mode only (empty Secret): the code to show next to the receiver's
 }
 
 type sender struct {
@@ -172,8 +222,12 @@ type sender struct {
 
 // RunSender serves one receiver. Cancelling ctx tells the receiver "user" and ends the session.
 func RunSender(ctx context.Context, t Transport, o SenderOptions) Result {
-	if res := handshake(ctx, RoleSender, t, o.RoomID, o.Secret, o.Device); res != nil {
+	_, sas, res := handshake(ctx, RoleSender, t, o.RoomID, o.Secret, o.Device)
+	if res != nil {
 		return failHandshake(t, *res)
+	}
+	if o.OnSAS != nil {
+		o.OnSAS(sas)
 	}
 	entries := make([]FileEntry, len(o.Files))
 	for i, f := range o.Files {
@@ -391,12 +445,27 @@ type curFile struct {
 
 // ReceiveState survives transport changes so a transfer can resume.
 type ReceiveState struct {
+	// Sender is the device name the sender gave in its hello: a label for the UI, not an identity.
+	Sender string
+	// SAS is the 6-digit nearby code to show beside the offer ("" when the transfer uses a share code).
+	SAS      string
 	Manifest string
 	Files    []NamedFile
 	Accepted bool
 	NextIdx  int
 	cur      *curFile
 	sinceAck int64
+}
+
+// senderName cleans a peer-chosen device name for display, the same way the sender treats receiver names.
+func senderName(device string) string {
+	if strings.TrimSpace(device) == "" {
+		return "sender" // DisplayName would make it "file"
+	}
+	if r := []rune(device); len(r) > 64 {
+		device = string(r[:64])
+	}
+	return DisplayName(device)
 }
 
 // Discard throws away a partial file that was kept for a resume. Call it when giving up for good.
@@ -421,8 +490,13 @@ func busy(s RS) bool { return s == RStreaming || s == RAwaitStart || s == RVerif
 
 // RunReceiver receives one transfer. Cancelling ctx tells the sender "user" and ends the session.
 func RunReceiver(ctx context.Context, t Transport, o ReceiverOptions) Result {
-	if res := handshake(ctx, RoleReceiver, t, o.RoomID, o.Secret, o.Device); res != nil {
+	peer, sas, res := handshake(ctx, RoleReceiver, t, o.RoomID, o.Secret, o.Device)
+	if res != nil {
 		return failHandshake(t, *res)
+	}
+	if o.State != nil {
+		o.State.Sender = senderName(peer)
+		o.State.SAS = sas
 	}
 	r := &receiver{t: t, o: o, ss: o.State}
 	st := RState{}

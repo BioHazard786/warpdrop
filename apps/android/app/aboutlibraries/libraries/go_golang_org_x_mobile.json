@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:golang.org/x/mobile",
+  "name": "golang.org/x/mobile",
+  "artifactVersion": "0.0.0-20261117202452-47699113848a",
+  "description": "",
+  "website": "https://pkg.go.dev/golang.org/x/mobile",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_golang_org_x_mobile"
+  ]
+}

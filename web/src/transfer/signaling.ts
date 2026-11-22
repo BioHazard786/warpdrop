@@ -2,15 +2,39 @@ import { z } from "zod"
 import { registerSignaling } from "./device"
 
 const peerId = z.string().max(64)
+const nearbyDevice = z.object({ peer_id: peerId, device: z.string().max(128) })
 const serverMsg = z.discriminatedUnion("t", [
   z.object({ t: z.literal("room_created"), room_id: z.string(), token: z.string() }),
   z.object({ t: z.literal("room_resumed"), room_id: z.string(), peers: z.array(peerId) }),
-  z.object({ t: z.literal("joined"), peer_id: peerId }),
-  z.object({ t: z.literal("peer_joined"), peer_id: peerId, client: z.unknown() }),
+  // ticket: nearby rooms hand back a fresh invite ticket so the receiver can rejoin after a socket drop
+  z.object({ t: z.literal("joined"), peer_id: peerId, ticket: z.string().optional() }),
+  // invited: nearby rooms say which invite (lobby device id) this receiver came through
+  z.object({
+    t: z.literal("peer_joined"),
+    peer_id: peerId,
+    client: z.unknown(),
+    invited: peerId.optional(),
+  }),
   z.object({ t: z.literal("peer_left"), peer_id: peerId }),
   z.object({ t: z.literal("signal"), from: peerId, payload: z.unknown() }),
   z.object({ t: z.literal("relay_ticket"), peer_id: peerId, ticket: z.string() }),
   z.object({ t: z.literal("room_closed") }),
+  // nearby lobby: devices on the same network
+  z.object({ t: z.literal("nearby_joined"), peer_id: peerId, devices: z.array(nearbyDevice) }),
+  z.object({ t: z.literal("nearby_peer"), peer: nearbyDevice }),
+  z.object({ t: z.literal("nearby_peer_left"), peer_id: peerId }),
+  z.object({
+    t: z.literal("nearby_invite"),
+    peer: nearbyDevice,
+    room_id: z.string().max(16),
+    ticket: z.string().max(64),
+  }),
+  // a nearby room's invitee said no (or is busy); peer_id is the lobby id that was invited
+  z.object({
+    t: z.literal("invite_declined"),
+    peer_id: peerId,
+    reason: z.enum(["declined", "busy"]),
+  }),
   z.object({ t: z.literal("error"), code: z.string(), message: z.string() }),
 ])
 export type ServerMsg = z.infer<typeof serverMsg>
@@ -103,6 +127,7 @@ const configSchema = z.object({
   ),
   relay: z.boolean(),
   maxReceivers: z.number(),
+  version: z.string().optional(), // the server build; absent on servers older than 2.1
 })
 export type AppConfig = z.infer<typeof configSchema>
 

@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/rtp",
+  "name": "github.com/pion/rtp",
+  "artifactVersion": "1.10.6",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/rtp",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_rtp"
+  ]
+}

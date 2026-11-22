@@ -1,0 +1,12 @@
+{
+  "uniqueId": "go:github.com/pion/sctp",
+  "name": "github.com/pion/sctp",
+  "artifactVersion": "1.12.0",
+  "description": "",
+  "website": "https://pkg.go.dev/github.com/pion/sctp",
+  "developers": [],
+  "tag": "go",
+  "licenses": [
+    "go_github_com_pion_sctp"
+  ]
+}

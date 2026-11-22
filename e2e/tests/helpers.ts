@@ -35,7 +35,8 @@ export interface Share {
 /** Open the send page, choose files, and wait for the share code. */
 export async function startSend(page: Page, files: TestFile[]): Promise<Share> {
   await page.goto("/")
-  await page.locator('input[type="file"]').setInputFiles(files)
+  await page.getByRole("tab", { name: "Link" }).click()
+  await page.getByRole("tabpanel", { name: "Link" }).locator('input[type="file"]').setInputFiles(files)
   const code = (await page.locator('[aria-label="Share code"]').textContent({ timeout: 20_000 }))!.trim()
   const [roomId, ...words] = code.split("-")
   const secret = words.join("-")

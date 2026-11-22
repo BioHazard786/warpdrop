@@ -29,6 +29,7 @@ type PeerView struct {
 	Sent      int64
 	Total     int64
 	FilesDone int
+	SAS       string // nearby only: the 6-digit code the receiver must see too
 }
 
 type SendHooks struct {
@@ -37,6 +38,14 @@ type SendHooks struct {
 	OnPeerGone func(id string)
 	OnStatus   func(msg string)
 }
+
+// InviteTimeout is how long a nearby send waits for the invited device to answer.
+var InviteTimeout = 60 * time.Second
+
+var (
+	ErrDeclined = errors.New("receiver declined")
+	ErrNoAnswer = errors.New("no response")
+)
 
 var reasonText = map[protocol.Reason]string{
 	protocol.ReasonDeclined:      "receiver declined",
@@ -57,6 +66,7 @@ type room struct {
 	device string
 	secret string
 	h      SendHooks
+	invite func(roomID, token string) error // nearby: ask the chosen device to join once the room exists
 
 	mu     sync.Mutex // guards sig, roomID, token, links
 	sig    *signaling.Client
@@ -72,9 +82,23 @@ type room struct {
 // RunSend creates a room and serves every receiver that joins until ctx is cancelled or the room dies.
 // Cancelling ctx tells active receivers "cancelled" and closes the room.
 func RunSend(ctx context.Context, cfg config.Config, srv config.Server, files []protocol.Source, device string, h SendHooks) error {
+	return runSend(ctx, cfg, srv, files, device, h, nil)
+}
+
+// RunSendNearby is RunSend for a device picked from the nearby list: there is no share code, the room admits only
+// the invited device, and both screens show the handshake's 6-digit code. invite is called once with the room's
+// id and token.
+func RunSendNearby(ctx context.Context, cfg config.Config, srv config.Server, files []protocol.Source, device string, h SendHooks, invite func(roomID, token string) error) error {
+	return runSend(ctx, cfg, srv, files, device, h, invite)
+}
+
+func runSend(ctx context.Context, cfg config.Config, srv config.Server, files []protocol.Source, device string, h SendHooks, invite func(roomID, token string) error) error {
 	var entries []protocol.FileEntry
-	r := &room{ctx: ctx, cfg: cfg, srv: srv, files: files, device: device, secret: protocol.GenerateSecret(), h: h,
+	r := &room{ctx: ctx, cfg: cfg, srv: srv, files: files, device: device, h: h, invite: invite,
 		links: map[string]*link{}, fatal: make(chan error, 1)}
+	if invite == nil {
+		r.secret = protocol.GenerateSecret()
+	}
 	for _, f := range files {
 		r.prefix = append(r.prefix, r.total)
 		r.total += f.Entry.Size
@@ -91,6 +115,10 @@ func RunSend(ctx context.Context, cfg config.Config, srv config.Server, files []
 	}
 	lastRoom.Store(r)
 	defer r.shutdown()
+	var noAnswer <-chan time.Time // nearby: give up on an invite nobody answers
+	if invite != nil {
+		noAnswer = time.After(InviteTimeout)
+	}
 	for {
 		r.mu.Lock()
 		in := r.sig.In
@@ -98,6 +126,8 @@ func RunSend(ctx context.Context, cfg config.Config, srv config.Server, files []
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-noAnswer:
+			return ErrNoAnswer
 		case err := <-r.fatal:
 			return err
 		case m, ok := <-in:
@@ -106,6 +136,9 @@ func RunSend(ctx context.Context, cfg config.Config, srv config.Server, files []
 					return err
 				}
 				continue
+			}
+			if m.T == "peer_joined" {
+				noAnswer = nil
 			}
 			if err := r.handle(m); err != nil {
 				return err
@@ -132,7 +165,7 @@ func (r *room) dial(resume bool) error {
 	if resume && id != "" {
 		return sig.Send(map[string]any{"t": "resume_room", "room_id": id, "token": tok})
 	}
-	return sig.Send(map[string]any{"t": "create_room", "v": 2, "client": map[string]any{"device": r.device}})
+	return sig.Send(map[string]any{"t": "create_room", "v": 2, "nearby": r.invite != nil, "client": map[string]any{"device": r.device}})
 }
 
 // reconnect redials with backoff and resumes the room; receivers on a live P2P link are unaffected meanwhile.
@@ -169,8 +202,18 @@ func (r *room) handle(m signaling.Message) error {
 		if r.h.OnRoom != nil {
 			r.h.OnRoom(m.RoomID, r.secret)
 		}
+		if r.invite != nil {
+			if err := r.invite(m.RoomID, m.Token); err != nil {
+				return fmt.Errorf("could not invite that device: %w", err)
+			}
+		}
 	case "room_resumed":
 		r.say("reconnected")
+	case "invite_declined": // only nearby rooms get this, and they invite one device
+		if m.Reason == "busy" {
+			return ErrBusy
+		}
+		return ErrDeclined
 	case "peer_joined":
 		var c struct{ Device string }
 		_ = json.Unmarshal(m.Client, &c)
@@ -380,6 +423,7 @@ func (l *link) attach(t protocol.Transport, from *protocol.RTCPeer) {
 			},
 			OnFileDone: func(int) { l.update(func(v *PeerView) { v.FilesDone++ }) },
 			OnOffered:  func() { l.update(func(v *PeerView) { v.Status = "waiting" }) },
+			OnSAS:      func(sas string) { l.update(func(v *PeerView) { v.SAS = sas }) },
 		})
 		l.mu.Lock()
 		stale, gone := l.gen != gen || l.closed, l.gone

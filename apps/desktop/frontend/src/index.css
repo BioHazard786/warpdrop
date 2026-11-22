@@ -1,0 +1,7 @@
+@import "../../../../web/src/index.css";
+/* the web app's components are not under this project's root, so tell Tailwind to read their classes too */
+@source "../../../../web/src";
+@source ".";
+
+html, body, #root { height: 100%; }
+body { @apply bg-background text-foreground font-sans antialiased; }

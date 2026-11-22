@@ -13,7 +13,8 @@ RUN go mod download
 COPY backend/ ./
 COPY --from=web /out ./web/dist
 ARG TARGETOS TARGETARCH
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /warpdrop ./cmd/server
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X github.com/BioHazard786/Warpdrop/backend/internal/version.Version=${VERSION#v}" -o /warpdrop ./cmd/server
 
 FROM gcr.io/distroless/static:nonroot
 COPY --from=build /warpdrop /warpdrop

@@ -285,3 +285,46 @@ func TestRelayResumeOnSecondConnection(t *testing.T) {
 		t.Fatal("resumed file differs")
 	}
 }
+
+// Smoke test for the ordering fix in watch(): handlers are wired when a channel appears, so a frame sent the
+// instant the channel opens must arrive. Loopback is too fast to reproduce the original drop (a fast phone
+// did, intermittently), so this guards the happy path only; the real check is a device on Wi-Fi.
+func TestFirstFrameSentOnOpenArrives(t *testing.T) {
+	for i := 0; i < 25; i++ {
+		var offerer, answerer *RTCPeer
+		var err error
+		offerer, err = NewRTCPeer(RTCPeerOptions{Offerer: true, SendSignal: func(s Signal) { go answerer.OnSignal(s) }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		answerer, err = NewRTCPeer(RTCPeerOptions{SendSignal: func(s Signal) { go offerer.OnSignal(s) }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := offerer.Start(); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ot, err := offerer.Ready(ctx, 15*time.Second)
+		if err != nil {
+			cancel()
+			offerer.Close()
+			answerer.Close()
+			t.Skip("could not establish loopback WebRTC in this environment")
+		}
+		if err := ot.SendText("first"); err != nil { // immediately, before the answerer has seen its channel open
+			t.Fatal(err)
+		}
+		at, err := answerer.Ready(ctx, 15*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, err := at.Recv(ctx)
+		if err != nil || w.Text != "first" {
+			t.Fatalf("iteration %d: first frame lost or wrong: %+v %v", i, w, err)
+		}
+		cancel()
+		offerer.Close()
+		answerer.Close()
+	}
+}

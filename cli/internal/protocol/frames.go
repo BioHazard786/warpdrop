@@ -62,6 +62,12 @@ type (
 		Client string `json:"client"`
 		Device string `json:"device"`
 		Pub    string `json:"pub"`
+		// Commit is set instead of Pub by a nearby sender: hex(SHA256(pub)), revealed later in Reveal.
+		Commit string `json:"commit,omitempty"`
+	}
+	Reveal struct {
+		T   string `json:"t"`
+		Pub string `json:"pub"`
 	}
 	Auth struct {
 		T   string `json:"t"`
@@ -102,8 +108,9 @@ type (
 )
 
 func NewHello(client, device, pubHex string) Hello {
-	return Hello{"hello", Version, client, device, pubHex}
+	return Hello{T: "hello", V: Version, Client: client, Device: device, Pub: pubHex}
 }
+func NewReveal(pubHex string) Reveal           { return Reveal{"reveal", pubHex} }
 func NewAuth(mac string) Auth                  { return Auth{"auth", mac} }
 func NewManifest(f []FileEntry) Manifest       { return Manifest{"manifest", f} }
 func NewRequest(id int, off int64) Request     { return Request{"request", id, off} }
@@ -154,8 +161,19 @@ func ParseFrame(text string) (any, error) {
 		if err := dec(&m); err != nil {
 			return nil, err
 		}
-		if !hex64.MatchString(m.Pub) || len(m.Client) > 64 || len(m.Device) > 128 {
+		keyOK := hex64.MatchString(m.Pub) && m.Commit == ""
+		commitOK := m.Pub == "" && hex64.MatchString(m.Commit)
+		if !(keyOK || commitOK) || len(m.Client) > 64 || len(m.Device) > 128 {
 			return nil, bad("hello fields")
+		}
+		return m, nil
+	case "reveal":
+		var m Reveal
+		if err := dec(&m); err != nil {
+			return nil, err
+		}
+		if !hex64.MatchString(m.Pub) {
+			return nil, bad("reveal pub")
 		}
 		return m, nil
 	case "auth":

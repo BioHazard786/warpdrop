@@ -13,16 +13,38 @@ import { IconArrowUp } from "@tabler/icons-react"
 import { useRef, useState } from "react"
 
 /** Dashed drop target; the whole thing is a <label> so it works with keyboard and screen readers too. */
-export function Dropzone({ onFiles }: { onFiles: (files: File[]) => void }) {
+export function Dropzone({
+  onFiles,
+  onBrowse,
+  compact = false,
+  hint = "or click to browse. Files stream straight to the other device; nothing is uploaded.",
+}: {
+  onFiles: (files: File[]) => void
+  /** Shorter, without the chips: for a page where the drop target is not the main thing. */
+  compact?: boolean
+  hint?: string
+  /** Native shells (the desktop app) pick files themselves: clicking calls this, and drops are handled outside. */
+  onBrowse?: () => void
+}) {
   const [over, setOver] = useState(false)
   const depth = useRef(0)
   return (
     <label
       data-over={over || undefined}
+      data-file-drop-target={onBrowse ? "" : undefined}
+      onClick={
+        onBrowse
+          ? (e) => {
+              e.preventDefault()
+              onBrowse()
+            }
+          : undefined
+      }
       className={cn(
-        "group/drop relative flex min-h-64 cursor-pointer rounded-2xl border-2 border-dashed border-input transition-colors",
+        "group/drop relative flex cursor-pointer rounded-2xl border-2 border-dashed border-input transition-colors",
         "hover:border-ring hover:bg-muted/40 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
         "data-over:border-foreground data-over:bg-muted/60",
+        compact ? "min-h-40" : "min-h-64",
       )}
       onDragEnter={(e) => {
         e.preventDefault()
@@ -50,7 +72,7 @@ export function Dropzone({ onFiles }: { onFiles: (files: File[]) => void }) {
         if (files.length) onFiles(files)
       }}
     >
-      <Empty>
+      <Empty className={compact ? "gap-3 p-6" : undefined}>
         <EmptyHeader>
           <EmptyMedia
             variant="icon"
@@ -61,26 +83,28 @@ export function Dropzone({ onFiles }: { onFiles: (files: File[]) => void }) {
           <EmptyTitle className="text-base">
             {over ? "Release to send" : "Drop files to send"}
           </EmptyTitle>
-          <EmptyDescription>
-            or click to browse. Files stream straight to the other device; nothing is uploaded.
-          </EmptyDescription>
+          <EmptyDescription>{hint}</EmptyDescription>
         </EmptyHeader>
-        <EmptyContent className="flex-row justify-center font-mono text-xs text-muted-foreground">
-          <Kbd>any size</Kbd>
-          <Kbd>any type</Kbd>
-          <Kbd>many at once</Kbd>
-        </EmptyContent>
+        {!compact && (
+          <EmptyContent className="flex-row justify-center font-mono text-xs text-muted-foreground">
+            <Kbd>any size</Kbd>
+            <Kbd>any type</Kbd>
+            <Kbd>many at once</Kbd>
+          </EmptyContent>
+        )}
       </Empty>
-      <input
-        type="file"
-        multiple
-        className="sr-only"
-        onChange={(e) => {
-          const files = [...(e.target.files ?? [])]
-          e.target.value = "" // allow picking the same file again later
-          if (files.length) onFiles(files)
-        }}
-      />
+      {!onBrowse && (
+        <input
+          type="file"
+          multiple
+          className="sr-only"
+          onChange={(e) => {
+            const files = [...(e.target.files ?? [])]
+            e.target.value = "" // allow picking the same file again later
+            if (files.length) onFiles(files)
+          }}
+        />
+      )}
     </label>
   )
 }
