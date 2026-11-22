@@ -1,7 +1,7 @@
-import { Section } from "@/components/section";
-import { IconBrandGithub, IconExternalLink } from "@tabler/icons-react";
-import { fetchConfig } from "@/transfer/signaling";
-import { createFileRoute } from "@tanstack/react-router";
+import { Section } from "@/components/section"
+import { IconBrandGithub, IconExternalLink } from "@tabler/icons-react"
+import { fetchConfig } from "@/transfer/signaling"
+import { createFileRoute } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/about")({
   // the web app is embedded in the server, so the server's version is the app's version
@@ -11,24 +11,23 @@ export const Route = createFileRoute("/about")({
       () => undefined,
     ),
   component: About,
-});
+})
 
-const GITHUB = "https://github.com/BioHazard786";
+const GITHUB = "https://github.com/BioHazard786"
 
 type App = {
-  name: string;
-  blurb: string;
-  live?: string;
-  repo: string;
-  here?: boolean;
-};
+  name: string
+  blurb: string
+  live?: string
+  repo: string
+  here?: boolean
+}
 
 // Keep in sync with the same list in Warpstash's about page and the Android app (ui/screens/About.kt).
 const APPS: App[] = [
   {
     name: "Warpstash",
-    blurb:
-      "Temporary file hosting with expiry, burn-after-reading and optional passwords.",
+    blurb: "Temporary file hosting with expiry, burn-after-reading and optional passwords.",
     live: "https://stash.warplabs.info",
     repo: `${GITHUB}/warpstash`,
   },
@@ -60,13 +59,12 @@ const APPS: App[] = [
     live: "https://tv.warplabs.info",
     repo: `${GITHUB}/warptv`,
   },
-];
+]
 
-const link =
-  "inline-flex items-center gap-1 underline underline-offset-4 hover:text-foreground";
+const link = "inline-flex items-center gap-1 underline underline-offset-4 hover:text-foreground"
 
 function About() {
-  const version = Route.useLoaderData();
+  const version = Route.useLoaderData()
   return (
     <>
       <Section title="The Warp family">
@@ -84,27 +82,14 @@ function About() {
                   </span>
                 )}
               </div>
-              <p className="text-sm leading-relaxed text-muted-foreground">
-                {app.blurb}
-              </p>
+              <p className="text-sm leading-relaxed text-muted-foreground">{app.blurb}</p>
               <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
                 {app.live && (
-                  <a
-                    href={app.live}
-                    target="_blank"
-                    rel="noreferrer"
-                    className={link}
-                  >
-                    {app.live.replace("https://", "")}{" "}
-                    <IconExternalLink className="size-3.5" />
+                  <a href={app.live} target="_blank" rel="noreferrer" className={link}>
+                    {app.live.replace("https://", "")} <IconExternalLink className="size-3.5" />
                   </a>
                 )}
-                <a
-                  href={app.repo}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={link}
-                >
+                <a href={app.repo} target="_blank" rel="noreferrer" className={link}>
                   <IconBrandGithub className="size-3.5" /> source
                 </a>
               </div>
@@ -114,9 +99,7 @@ function About() {
       </Section>
 
       <Section title="Version">
-        <p className="font-mono text-sm text-muted-foreground">
-          WarpDrop {version ?? "unknown"}
-        </p>
+        <p className="font-mono text-sm text-muted-foreground">WarpDrop {version ?? "unknown"}</p>
       </Section>
 
       <Section title="The developer">
@@ -125,11 +108,10 @@ function About() {
           <a href={GITHUB} target="_blank" rel="noreferrer" className={link}>
             @BioHazard786
           </a>
-          ). Warp is a family of open-source, self-hostable utilities: use the
-          hosted versions, or run your own. Bug reports, ideas and pull requests
-          are welcome.
+          ). Warp is a family of open-source, self-hostable utilities: use the hosted versions, or
+          run your own. Bug reports, ideas and pull requests are welcome.
         </p>
       </Section>
     </>
-  );
+  )
 }
