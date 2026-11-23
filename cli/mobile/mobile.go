@@ -281,9 +281,32 @@ func NewDirSink(dir string) (*DirSink, error) {
 func (s *DirSink) Dir() string  { return s.d.Dir }
 func (s *DirSink) Close() error { return s.d.Close() }
 
+// savedListener is optional (Go callers only, so gomobile never sees it): a ReceiveListener that also has OnSaved
+// learns where each file lands in a DirSink, which may differ from its name ("name (1).ext") to avoid overwriting.
+type savedListener interface {
+	OnSaved(idx int32, path string)
+}
+
+// namingSink is a DiskSink that reports each file's final path as it is reserved.
+type namingSink struct {
+	*transfer.DiskSink
+	l savedListener
+}
+
+func (n namingSink) Open(f protocol.NamedFile, idx int) (protocol.FileWriter, error) {
+	w, err := n.DiskSink.Open(f, idx)
+	if named, ok := w.(interface{ FinalName() string }); ok && err == nil {
+		n.l.OnSaved(int32(idx), filepath.Join(n.Dir, named.FinalName()))
+	}
+	return w, err
+}
+
 // asSink picks the writer for the job: a DirSink writes itself, anything else hands Go a file descriptor.
-func asSink(s Sink) protocol.Sink {
+func asSink(s Sink, l ReceiveListener) protocol.Sink {
 	if d, ok := s.(*DirSink); ok {
+		if sl, ok := l.(savedListener); ok {
+			return namingSink{d.d, sl}
+		}
 		return d.d
 	}
 	return fdSink{s}
@@ -341,9 +364,9 @@ func (j *ReceiveJob) receive(ctx context.Context, roomID, secret, ticket string,
 	}
 	hooks := receiveHooks(l)
 	if ticket != "" {
-		return transfer.RunReceiveNearby(ctx, cfg, srv, roomID, ticket, j.device, asSink(sink), hooks)
+		return transfer.RunReceiveNearby(ctx, cfg, srv, roomID, ticket, j.device, asSink(sink, l), hooks)
 	}
-	return transfer.RunReceive(ctx, cfg, srv, roomID, secret, j.device, asSink(sink), hooks)
+	return transfer.RunReceive(ctx, cfg, srv, roomID, secret, j.device, asSink(sink, l), hooks)
 }
 
 // receiveHooks adapts a ReceiveListener, thinning progress calls and carrying the nearby code into the offer.
@@ -561,54 +584,68 @@ func (j *NearbyJob) run(ctx context.Context, l NearbyListener) error {
 	return nil
 }
 
-// joinServer enters the server's list and follows it until the connection ends. Failure is reported, not fatal.
+// joinServer keeps this device in the server's list until ctx ends: when the connection drops (laptop sleep, a
+// Wi-Fi change, a restarted server) it rejoins with growing pauses instead of leaving the list empty for good.
+// Failure is reported, not fatal.
 func (j *NearbyJob) joinServer(ctx context.Context, cfg config.Config, l NearbyListener) {
 	report := func(msg string) {
 		j.cb.Lock()
 		l.OnServer(msg)
 		j.cb.Unlock()
 	}
-	lobby, err := nearby.Join(ctx, cfg, j.device, j.hidden)
-	if err != nil {
-		report(err.Error())
-		return
-	}
-	j.mu.Lock()
-	j.l = lobby
-	j.lobbyDevs = lobby.Devices()
-	j.mu.Unlock()
-	report("")
-	j.refresh()
-	go func() {
-		defer lobby.Close()
-		for {
-			select {
-			case e, ok := <-lobby.Events:
-				if !ok {
-					j.mu.Lock()
-					j.l, j.lobbyDevs = nil, nil
-					j.mu.Unlock()
-					j.refresh()
-					if ctx.Err() == nil {
-						report("lost the connection to the server")
-					}
-					return
-				}
-				if e.Kind == "invite" {
-					j.cb.Lock()
-					l.OnInvite(e.Device.ID, e.Device.Name, e.RoomID, e.Ticket)
-					j.cb.Unlock()
-					continue
-				}
-				j.mu.Lock()
-				j.lobbyDevs = lobby.Devices()
-				j.mu.Unlock()
-				j.refresh()
-			case <-ctx.Done():
-				return
+	for pause := time.Second; ctx.Err() == nil; pause = min(pause*2, 30*time.Second) {
+		lobby, err := nearby.Join(ctx, cfg, j.device, j.hidden)
+		if err != nil {
+			if ctx.Err() == nil {
+				report(err.Error())
+			}
+		} else {
+			pause = time.Second / 2 // doubled to 1s by the loop: a drop after a good session retries quickly
+			j.mu.Lock()
+			j.l = lobby
+			j.lobbyDevs = lobby.Devices()
+			j.mu.Unlock()
+			report("")
+			j.refresh()
+			j.follow(ctx, lobby, l)
+			if ctx.Err() == nil {
+				report("lost the connection to the server, reconnecting")
 			}
 		}
-	}()
+		select {
+		case <-time.After(pause):
+		case <-ctx.Done():
+		}
+	}
+}
+
+// follow relays the lobby's events until its connection ends or ctx is done, then clears the server's part of the list.
+func (j *NearbyJob) follow(ctx context.Context, lobby *nearby.Lobby, l NearbyListener) {
+	defer lobby.Close()
+	for {
+		select {
+		case e, ok := <-lobby.Events:
+			if !ok {
+				j.mu.Lock()
+				j.l, j.lobbyDevs = nil, nil
+				j.mu.Unlock()
+				j.refresh()
+				return
+			}
+			if e.Kind == "invite" {
+				j.cb.Lock()
+				l.OnInvite(e.Device.ID, e.Device.Name, e.RoomID, e.Ticket)
+				j.cb.Unlock()
+				continue
+			}
+			j.mu.Lock()
+			j.lobbyDevs = lobby.Devices()
+			j.mu.Unlock()
+			j.refresh()
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // Decline turns down an invite from OnInvite so the sender stops waiting; busy says we are mid-transfer rather
@@ -716,7 +753,7 @@ func (j *NearbyJob) ListenLAN(h LANHandler) (int32, error) {
 			j.mu.Unlock()
 		}()
 		l := h.Listener(id)
-		offered, err := transfer.ReceiveLAN(cctx, c, j.device, asSink(h.Sink(id)), receiveHooks(l))
+		offered, err := transfer.ReceiveLAN(cctx, c, j.device, asSink(h.Sink(id), l), receiveHooks(l))
 		l.OnEnd(errString(err))
 		return offered, err
 	})

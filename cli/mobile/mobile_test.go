@@ -3,11 +3,13 @@ package mobile
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -514,4 +516,62 @@ func TestNearbyDeclineEndsTheSend(t *testing.T) {
 	if err := wait(t, sev.end); err != "device is busy" {
 		t.Fatalf("sender: %q", err)
 	}
+}
+
+// A dropped server connection (laptop sleep, Wi-Fi change) must not leave the device out of the list for good.
+func TestNearbyRejoinsAfterTheConnectionDrops(t *testing.T) {
+	if serverURL == "" {
+		t.Skip("backend binary unavailable")
+	}
+	target := strings.TrimPrefix(serverURL, "http://")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			up, err := net.Dial("tcp", target)
+			if err != nil {
+				c.Close()
+				continue
+			}
+			mu.Lock()
+			conns = append(conns, c, up)
+			mu.Unlock()
+			go func() { io.Copy(up, c); up.Close() }()
+			go func() { io.Copy(c, up); c.Close() }()
+		}
+	}()
+
+	watcher := NewNearbyJob(serverURL, "Watcher", false)
+	watcher.Start(newNearbyEvents())
+	t.Cleanup(watcher.Stop)
+	flaky := NewNearbyJob("http://"+ln.Addr().String(), "Flaky", false)
+	flaky.Start(newNearbyEvents())
+	t.Cleanup(flaky.Stop)
+
+	waitFor := func(want int32, what string) {
+		t.Helper()
+		for end := time.Now().Add(15 * time.Second); watcher.DeviceCount() != want; time.Sleep(50 * time.Millisecond) {
+			if time.Now().After(end) {
+				t.Fatalf("%s: the watcher sees %d device(s), want %d", what, watcher.DeviceCount(), want)
+			}
+		}
+	}
+	waitFor(1, "first join")
+	mu.Lock()
+	for _, c := range conns {
+		c.Close()
+	}
+	conns = nil
+	mu.Unlock()
+	waitFor(0, "after the drop")
+	waitFor(1, "after the automatic rejoin")
 }
