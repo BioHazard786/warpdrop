@@ -1,9 +1,9 @@
 import { Events } from "@wailsio/runtime"
 import { create } from "zustand"
 import { toast } from "@/components/ui/toast"
-import { Dialogs, Engine, type Device, type FileInfo, type Transfer } from "~/api"
+import { Dialogs, Engine, type Device, type FileInfo, type Settings, type Transfer } from "~/api"
 
-export type Tab = "nearby" | "link"
+export type Tab = "nearby" | "link" | "receive" | "activity" | "settings"
 
 interface App {
   device: string
@@ -12,6 +12,10 @@ interface App {
   server: string // "" = connected to the server's device list
   devices: Device[]
   transfers: Transfer[]
+  /** Finished transfers cleared from the Nearby, Link and Receive pages: still in Activity until removed there. */
+  hidden: string[]
+  settings: Settings
+  version: string
   tab: Tab
   /** Files picked on the Nearby tab, sent to each device that gets tapped. */
   staged: { paths: string[]; files: FileInfo[] }
@@ -24,6 +28,9 @@ export const useApp = create<App>(() => ({
   server: "",
   devices: [],
   transfers: [],
+  hidden: [],
+  settings: { device: "", dir: "", server: "" },
+  version: "",
   tab: "nearby",
   staged: { paths: [], files: [] },
 }))
@@ -39,12 +46,20 @@ export function init() {
   Events.On("devices", (e) => set({ devices: (e.data as Device[]) ?? [] }))
   Events.On("server", (e) => set({ server: e.data as string }))
   Events.On("visible", (e) => set({ visible: e.data as boolean }))
-  Events.On("transfer", (e) => set((s) => ({ transfers: upsert(s.transfers, e.data as Transfer) })))
+  Events.On("transfer", (e) => {
+    const t = e.data as Transfer
+    // incoming files take focus, as they did when the receive page replaced the whole window
+    const fresh = t.kind === "receive" && !t.done && !useApp.getState().transfers.some((x) => x.id === t.id)
+    set((s) => ({ transfers: upsert(s.transfers, t), ...(fresh && { tab: "receive" as Tab }) }))
+  })
   // files dropped on the window arrive as real paths: staged for nearby devices, or shared with a code
   Events.On("files-dropped", (e) => {
     const paths = e.data as string[]
-    if (useApp.getState().tab === "nearby") void actions.stage(paths)
-    else Engine.SendWithCode(paths).catch(fail)
+    if (useApp.getState().tab === "link") Engine.SendWithCode(paths).catch(fail)
+    else {
+      set({ tab: "nearby" })
+      void actions.stage(paths)
+    }
   })
   Events.On("dismissed", (e) => set((s) => ({ transfers: s.transfers.filter((t) => t.id !== e.data) })))
   Engine.State()
@@ -52,6 +67,10 @@ export function init() {
       set((s) => ({
         device: st.device,
         dir: st.dir,
+        settings: st.settings,
+        version: st.version,
+        // history from earlier runs belongs on Activity, not on the pages it finished on
+        hidden: [...s.hidden, ...(st.transfers ?? []).filter((t) => t.done).map((t) => t.id)],
         visible: st.visible,
         server: st.server,
         devices: st.devices ?? [],
@@ -92,20 +111,34 @@ export const actions = {
   async sendWithCode() {
     try {
       const paths = await Dialogs.PickFiles()
-      if (paths?.length) await Engine.SendWithCode(paths)
+      if (paths?.length) {
+        set({ tab: "link" })
+        await Engine.SendWithCode(paths)
+      }
     } catch (e) {
       fail(e)
     }
   },
   openDownloads: () => Dialogs.Reveal(useApp.getState().dir).catch(fail),
-  receiveCode: (code: string) => Engine.ReceiveCode(code.trim()).catch(fail),
+  /** Point at a received file in the file manager (its folder if the path isn't known). */
+  showFile: (path?: string) => (path ? Dialogs.ShowFile(path) : Dialogs.Reveal(useApp.getState().dir)).catch(fail),
+  openFile: (path: string) => Dialogs.Reveal(path).catch(fail),
+  /** Clear finished transfers from the working pages; Activity keeps them. */
+  hide: (ids: string[]) => set((s) => ({ hidden: [...s.hidden, ...ids] })),
+  async saveSettings(next: Settings) {
+    await Engine.SaveSettings(next) // throws a readable message for the form
+    const st = await Engine.State()
+    set({ settings: st.settings, device: st.device, dir: st.dir })
+  },
+  pickFolder: () => Dialogs.PickFolder(),
+  receiveCode: (code: string) => {
+    set({ tab: "receive" })
+    return Engine.ReceiveCode(code.trim()).catch(fail)
+  },
   respond: (id: string, accept: boolean) => Engine.Respond(id, accept).catch(fail),
   cancel: (id: string) => Engine.Cancel(id).catch(fail),
   dismiss: (id: string) => Engine.Dismiss(id).catch(fail),
-  /** Leave a finished receive: clear every finished one, or the next older result would take its place. */
+  /** Leave a finished receive: hide every finished one, or the next older result would take its place. */
   dismissReceived: () =>
-    useApp
-      .getState()
-      .transfers.filter((t) => t.kind === "receive" && t.done)
-      .forEach((t) => Engine.Dismiss(t.id).catch(fail)),
+    actions.hide(useApp.getState().transfers.filter((t) => t.kind === "receive" && t.done).map((t) => t.id)),
 }

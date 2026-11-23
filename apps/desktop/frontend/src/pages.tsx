@@ -2,21 +2,27 @@
 // engine's state instead of the browser transfer stores. Keep the markup in step with those two files.
 import {
   IconAlertTriangle,
+  IconArrowDownLeft,
+  IconArrowUpRight,
+  IconExternalLink,
+  IconHistory,
+  IconLink,
+  IconRadar2,
   IconFolderOpen,
   IconCheck,
   IconCircleDashed,
   IconDownload,
   IconInfoCircle,
-  IconLink,
   IconLock,
   IconPlayerStop,
   IconPlus,
-  IconRadar2,
   IconX,
 } from "@tabler/icons-react"
-import { useRef, useState } from "react"
-import { CrystalBall } from "@/components/crystal-ball"
+import { useEffect, useRef, useState } from "react"
 import { Dropzone } from "@/components/dropzone"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FileList } from "@/components/file-list"
 import { NearbyDevices, type TileStatus } from "@/components/nearby-devices"
 import { Orb } from "@/components/orb"
@@ -41,12 +47,12 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input"
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
 import { Progress } from "@/components/ui/progress"
-import { Spinner } from "@/components/ui/spinner"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { formatBytes, formatCode, formatETA, formatSpeed, SpeedMeter } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { Pulse } from "~/components/loading-ui/pulse"
+import { ChromeCheck } from "~/components/effects"
 import type { Transfer } from "~/api"
-import { actions, type Tab, useApp } from "~/store"
+import { actions, useApp } from "~/store"
 
 const files = (t: Transfer) => (t.files ?? []).map((f) => ({ name: f.name, size: f.size }))
 
@@ -59,40 +65,186 @@ function useRate(sent: number, total: number, live: boolean) {
 
 // ---------------------------------------------------------------- idle (web: routes/index.tsx SendPage)
 
-/** The send side, laid out like the web's: Nearby | Link tabs that stay put while a share runs. */
-export function Home({ share }: { share?: Transfer }) {
-  const tab = useApp((s) => s.tab)
-  const sharing = share !== undefined && !share.done
-  const nearbyLive = useApp((s) => s.transfers.some((t) => t.kind === "send" && t.nearby && !t.done))
-  const active = sharing || nearbyLive
-  const value = sharing ? "link" : nearbyLive ? "nearby" : tab
+/** The Link page: share files with a code, or keep showing the running share. */
+export function LinkPage({ share }: { share?: Transfer }) {
+  return share ? <SendPage t={share} /> : <Dropzone onFiles={() => {}} onBrowse={actions.sendWithCode} />
+}
+
+/** The Receive page: type a code when idle, otherwise the focused incoming transfer with any others listed under it. */
+export function ReceivePane({ t, others }: { t?: Transfer; others: Transfer[] }) {
   return (
-    <Tabs value={value} onValueChange={(v) => actions.setTab(v as Tab)} className="gap-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <TabsList className="h-10 w-full sm:w-auto">
-          <TabsTrigger value="nearby" disabled={sharing} className="px-4">
-            <IconRadar2 /> Nearby
-          </TabsTrigger>
-          <TabsTrigger value="link" disabled={nearbyLive && !sharing} className="px-4">
-            <IconLink /> Link
-          </TabsTrigger>
-        </TabsList>
-        {active && <span className="font-mono text-xs text-muted-foreground">Stop sharing to switch</span>}
-      </div>
-      <TabsContent value="nearby" className="animate-in fade-in duration-300">
-        <NearbyTab />
-      </TabsContent>
-      <TabsContent value="link" className="animate-in fade-in duration-300">
-        {share ? (
-          <SendPage t={share} />
-        ) : (
-          <div className="flex flex-col gap-10">
-            <Dropzone onFiles={() => {}} onBrowse={actions.sendWithCode} />
-            <CodeForm />
-          </div>
+    <div className="flex flex-col gap-10">
+      {t ? <ReceivePage t={t} /> : <CodeForm />}
+      {others.length > 0 && (
+        <Section title="Also receiving" aside={others.length}>
+          <ul className="flex flex-col gap-2">
+            {others.map((x) => (
+              <TransferRow key={x.id} t={x} />
+            ))}
+          </ul>
+        </Section>
+      )}
+    </div>
+  )
+}
+
+const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
+function ago(ms: number) {
+  const m = Math.round((Date.now() - ms) / 60000)
+  if (m < 1) return "just now"
+  if (m < 60) return rtf.format(-m, "minute")
+  const h = Math.round(m / 60)
+  return h < 24 ? rtf.format(-h, "hour") : new Date(ms).toLocaleDateString()
+}
+
+/** Why a finished transfer didn't deliver, in a word or two. */
+const why = (t: Transfer) =>
+  t.status === "declined" ? "Declined" : t.status === "cancelled" ? "Cancelled" : (DECLINES[t.error] ?? (t.error || "Failed"))
+
+function Stat({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="flex flex-col gap-1 rounded-xl border p-4">
+      <span className="font-mono text-xs tracking-wider text-muted-foreground uppercase">{label}</span>
+      <span className="font-pixel text-3xl leading-none tabular-nums">{value}</span>
+      <span className="text-xs text-muted-foreground">{detail}</span>
+    </div>
+  )
+}
+
+/** A finished transfer: what went where, how it ended, and when. */
+function HistoryRow({ t }: { t: Transfer }) {
+  const sent = t.kind === "send"
+  const ok = t.status === "done"
+  const fs = t.files ?? []
+  const name = fs.length ? fs[0].name + (fs.length > 1 ? ` and ${fs.length - 1} more` : "") : "Files"
+  const peer = t.peer ? `${sent ? "to" : "from"} ${t.peer}` : sent ? "by link" : ""
+  const path = t.paths?.[0]
+  return (
+    <Item variant="outline" render={<li />} className="rounded-xl">
+      <ItemMedia
+        variant="icon"
+        className={cn("size-9 rounded-lg", ok ? "bg-muted" : "bg-destructive/10 text-destructive")}
+      >
+        {sent ? <IconArrowUpRight /> : <IconArrowDownLeft />}
+      </ItemMedia>
+      <ItemContent className="min-w-0">
+        <ItemTitle className="w-full truncate">{name}</ItemTitle>
+        <ItemDescription className="truncate font-mono text-xs tabular-nums">
+          {peer && <>{peer} · </>}
+          {formatBytes(t.total)}
+          {!ok && <span className="text-destructive"> · {why(t)}</span>}
+          {t.started > 0 && <span title={new Date(t.started).toLocaleString()}> · {ago(t.started)}</span>}
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        {ok && t.transport && <TransportBadge transport={t.transport as "rtc" | "relay" | "lan"} />}
+        {ok && !sent && fs.length === 1 && path && (
+          <Button variant="ghost" size="icon-sm" aria-label={`Open ${name}`} onClick={() => actions.openFile(path)}>
+            <IconExternalLink />
+          </Button>
         )}
-      </TabsContent>
-    </Tabs>
+        {ok && !sent && (
+          <Button variant="ghost" size="icon-sm" aria-label="Show in folder" onClick={() => actions.showFile(path)}>
+            <IconFolderOpen />
+          </Button>
+        )}
+        <Button variant="ghost" size="icon-sm" aria-label="Remove from list" onClick={() => actions.dismiss(t.id)}>
+          <IconX />
+        </Button>
+      </ItemActions>
+    </Item>
+  )
+}
+
+type Filter = "all" | "send" | "receive"
+
+/** Totals, what's running, and what already happened, newest first. Lives as long as the app does. */
+export function ActivityPage() {
+  const all = useApp((s) => s.transfers)
+  const [filter, setFilter] = useState<Filter>("all")
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const i = setInterval(() => tick((n) => n + 1), 30_000) // keeps "5 minutes ago" honest
+    return () => clearInterval(i)
+  }, [])
+
+  if (!all.length)
+    return (
+      <Empty className="min-h-80 border-2 border-dashed border-input">
+        <EmptyHeader>
+          <EmptyMedia variant="icon" className="size-11 rounded-xl">
+            <IconHistory className="size-5" />
+          </EmptyMedia>
+          <EmptyTitle className="text-base">Nothing sent or received yet</EmptyTitle>
+          <EmptyDescription>Every transfer since WarpDrop opened shows up here, with where it went.</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent className="flex-row flex-wrap justify-center">
+          <Button variant="outline" size="sm" onClick={() => actions.setTab("nearby")}>
+            <IconRadar2 data-icon="inline-start" /> Send nearby
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => actions.setTab("link")}>
+            <IconLink data-icon="inline-start" /> Share a link
+          </Button>
+        </EmptyContent>
+      </Empty>
+    )
+
+  const delivered = (kind: string) => all.filter((t) => t.kind === kind && t.status === "done")
+  const bytes = (ts: Transfer[]) => ts.reduce((n, t) => n + t.total, 0)
+  const count = (ts: Transfer[]) => {
+    const n = ts.reduce((k, t) => k + (t.files ?? []).length, 0)
+    return `${n} ${n === 1 ? "file" : "files"}`
+  }
+  const running = all.filter((t) => !t.done).length
+  const sent = delivered("send")
+  const got = delivered("receive")
+  const shown = filter === "all" ? all : all.filter((t) => t.kind === filter)
+  const live = shown.filter((t) => !t.done)
+  const past = shown.filter((t) => t.done)
+  return (
+    <div className="flex flex-col gap-10">
+      <div className="grid grid-cols-3 gap-3">
+        <Stat label="Sent" value={formatBytes(bytes(sent))} detail={count(sent)} />
+        <Stat label="Received" value={formatBytes(bytes(got))} detail={count(got)} />
+        <Stat label="Active" value={String(running)} detail={running === 1 ? "transfer running" : "transfers running"} />
+      </div>
+      <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
+        <TabsList>
+          <TabsTrigger value="all">All</TabsTrigger>
+          <TabsTrigger value="send">Sent</TabsTrigger>
+          <TabsTrigger value="receive">Received</TabsTrigger>
+        </TabsList>
+      </Tabs>
+      {live.length > 0 && (
+        <Section title="In progress" aside={live.length}>
+          <ul className="flex flex-col gap-2">
+            {live.map((t) => (
+              <TransferRow key={t.id} t={t} />
+            ))}
+          </ul>
+        </Section>
+      )}
+      <Section
+        title="History"
+        aside={
+          past.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={() => past.forEach((t) => actions.dismiss(t.id))}>
+              Clear
+            </Button>
+          )
+        }
+      >
+        {past.length ? (
+          <ul className="flex flex-col gap-2">
+            {past.map((t) => (
+              <HistoryRow key={t.id} t={t} />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">Nothing finished yet.</p>
+        )}
+      </Section>
+    </div>
   )
 }
 
@@ -129,9 +281,9 @@ function tile(t: Transfer | undefined): TileStatus | undefined {
 }
 
 /** Pick files once, then tap any number of devices: each tap is its own transfer with its own ring. */
-function NearbyTab() {
-  const { devices, visible, device, staged, transfers } = useApp()
-  const sends = transfers.filter((t) => t.kind === "send" && t.nearby)
+export function NearbyPage() {
+  const { devices, visible, device, staged, transfers, hidden } = useApp()
+  const sends = transfers.filter((t) => t.kind === "send" && t.nearby && !hidden.includes(t.id))
   const latest = (id: string) => sends.find((t) => t.to === id) // newest first
   const total = staged.files.reduce((n, f) => n + f.size, 0)
   return (
@@ -165,7 +317,6 @@ function NearbyTab() {
         visible={visible}
         connected
         self={device}
-        setVisible={actions.setVisible}
         status={(d) => tile(latest(d.id))}
         onPick={(d) => {
           const t = latest(d.id)
@@ -181,7 +332,7 @@ function NearbyTab() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => sends.filter((t) => t.done).forEach((t) => actions.dismiss(t.id))}
+                onClick={() => actions.hide(sends.filter((t) => t.done).map((t) => t.id))}
               >
                 Clear finished
               </Button>
@@ -200,7 +351,8 @@ function NearbyTab() {
           sending={sends.some((t) => t.status === "sending")}
           label={sends.some((t) => !t.done) ? "Stop sharing" : "Clear files"}
           onStop={() => {
-            sends.forEach((t) => (t.done ? actions.dismiss(t.id) : actions.cancel(t.id)))
+            sends.forEach((t) => !t.done && actions.cancel(t.id))
+            actions.hide(sends.map((t) => t.id))
             actions.clearStaged()
           }}
         />
@@ -240,6 +392,7 @@ export function TransferRow({ t }: { t: Transfer }) {
         eta: rate.eta,
       }}
       onCancel={() => actions.cancel(t.id)}
+      incoming={t.kind === "receive"}
     />
   )
 }
@@ -319,7 +472,7 @@ export function SendPage({ t }: { t: Transfer }) {
 
       {t.nearby && !hasPeer && (
         <div className="flex flex-col items-center gap-4 py-6 text-center" role="status">
-          <Orb listening className="size-44" />
+          <Orb variant="aurora" listening className="size-44" />
           <div className="flex max-w-sm flex-col gap-1">
             <p className="shimmer font-medium">Waiting for {t.peer} to respond</p>
             <p className="text-sm text-muted-foreground">They get a prompt on their device. Keep this window open.</p>
@@ -363,7 +516,7 @@ export function SendPage({ t }: { t: Transfer }) {
       </Section>
 
       {t.done ? (
-        <Button variant="outline" className="self-start" onClick={() => actions.dismiss(t.id)}>
+        <Button variant="outline" className="self-start" onClick={() => actions.hide([t.id])}>
           Send more files
         </Button>
       ) : (
@@ -461,11 +614,11 @@ export function ReceivePage({ t }: { t: Transfer }) {
   }
 
   if (t.status === "done") {
+    const path = t.paths?.[0]
+    const one = fs.length === 1 && path
     return (
       <div className="flex flex-col items-start gap-6">
-        <div className="flex size-12 items-center justify-center rounded-2xl bg-foreground text-background">
-          <IconCheck className="size-6" />
-        </div>
+        <ChromeCheck />
         <div className="flex flex-col gap-2">
           <h1 className="font-serif text-2xl tracking-tight text-balance sm:text-3xl">
             Received {n}
@@ -476,8 +629,13 @@ export function ReceivePage({ t }: { t: Transfer }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={actions.openDownloads}>
-            <IconFolderOpen data-icon="inline-start" /> Open folder
+          {one && (
+            <Button onClick={() => actions.openFile(path)}>
+              <IconExternalLink data-icon="inline-start" /> Open
+            </Button>
+          )}
+          <Button variant={one ? "outline" : "default"} onClick={() => actions.showFile(path)}>
+            <IconFolderOpen data-icon="inline-start" /> Show in folder
           </Button>
           <Button variant="outline" onClick={actions.dismissReceived}>
             Done
@@ -494,11 +652,11 @@ export function ReceivePage({ t }: { t: Transfer }) {
     )
     return (
       <div className="flex flex-col items-center gap-8 py-4">
-        <CrystalBall speed={0.6 + at * 0.3} className="size-44 sm:size-52" />
+        <Orb variant="ember" energy={0.4 + at * 0.25} className="size-44 sm:size-52" />
         <ol className="flex flex-col gap-3" role="status" aria-live="polite">
           {STEPS.map(([k, label], i) => (
             <Marker key={k} render={<li />} className={cn(i === at && "text-foreground", i > at && "opacity-50")}>
-              <MarkerIcon>{i < at ? <IconCheck /> : i === at ? <Spinner /> : <IconCircleDashed />}</MarkerIcon>
+              <MarkerIcon>{i < at ? <IconCheck /> : i === at ? <Pulse className="size-4" /> : <IconCircleDashed />}</MarkerIcon>
               <MarkerContent className={cn(i === at && "shimmer")}>{label}</MarkerContent>
             </Marker>
           ))}
@@ -627,7 +785,7 @@ function Stopped({ t }: { t: Transfer }) {
         </h1>
         <p className="text-pretty text-muted-foreground">{t.error || "The share is no longer active."}</p>
       </div>
-      <Button onClick={() => actions.dismiss(t.id)}>Start over</Button>
+      <Button onClick={() => actions.hide([t.id])}>Start over</Button>
     </div>
   )
 }
