@@ -31,7 +31,7 @@ var (
 var receiveCmd = &cobra.Command{
 	Use:     "receive <code|link> | --nearby",
 	Aliases: []string{"r"},
-	Short:   "Receive files from a browser or another CLI",
+	Short:   "Receive files with a code, or from a nearby device (--nearby)",
 	Long: `Receive files using the code or link the sender shows. Files are saved to the current directory
 (or --dir), never overwriting existing files.
 

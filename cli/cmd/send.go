@@ -28,7 +28,7 @@ var (
 var sendCmd = &cobra.Command{
 	Use:     "send <files...>",
 	Aliases: []string{"s"},
-	Short:   "Send files to a browser or another CLI",
+	Short:   "Send files with a code, or to a nearby device (--nearby)",
 	Long: `Send files directly to a receiver. Share the printed code or link; the receiver can use the
 web app or "warpdrop receive". The words after the number never reach the server.
 

@@ -22,7 +22,15 @@ var rootCmd = &cobra.Command{
 	Use:   "warpdrop",
 	Short: "Send files directly between devices, from the terminal or the browser",
 	Long: `WarpDrop sends files device to device over WebRTC, with an end-to-end encrypted relay as fallback.
-The CLI and the web app speak the same protocol, so either can send to the other.`,
+The CLI, the web app and the Android and desktop apps speak the same protocol, so any can send to any other.
+
+Examples:
+  warpdrop send report.pdf              # prints a code and a link to share
+  warpdrop receive <code|link>          # receive with what the sender shows
+  warpdrop send --nearby photo.jpg      # pick a device on this network, no code needed
+  warpdrop send --to phone photo.jpg    # same, by name
+  warpdrop receive --nearby             # show up on this network and wait for someone to send
+  warpdrop config set server https://drop.example.com   # use a self-hosted server`,
 	Version: version.Version,
 }
 
