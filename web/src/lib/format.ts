@@ -51,7 +51,10 @@ export const formatCode = (c: string) => (c.length === 6 ? `${c.slice(0, 3)} ${c
 
 /** Splits a peer's device label into a title and a detail line: "Chrome 156 on Linux" -> Chrome 156 / Linux, "box (CLI 1.2)" -> box / CLI 1.2, "Brave (Chromium 131) on macOS" -> Brave / macOS. */
 export function splitDevice(name: string): { title: string; detail: string } {
-  const m = / on ([^()]+)$/.exec(name) ?? / \((CLI[^)]*)\)$/.exec(name)
+  // only the automatic " on <OS>" form splits, so a name the user typed ("Fedora on my desk") stays whole
+  const m =
+    / on (Android|iOS|iPadOS|Windows|macOS|Linux|ChromeOS|device)$/.exec(name) ??
+    / \((CLI[^)]*)\)$/.exec(name)
   // Brave's label carries its Chromium base, "Brave (Chromium 131)": too long for a title
   const title = m ? name.slice(0, m.index).replace(/ \(Chromium[^)]*\)$/, "") : name
   return { title, detail: m ? m[1]! : "" }

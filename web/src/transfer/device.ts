@@ -24,12 +24,41 @@ const OSES: [RegExp, string][] = [
   [/Linux/, "Linux"],
 ]
 
-/** Short human label for the other side's UI, e.g. "Chrome 157 on Android". Best effort, never throws. */
+const NAME_KEY = "warpdrop.device"
+
+/** A typed device name as it goes on the wire: no control characters, one space between words, 64 characters. */
+export const cleanName = (raw: string) =>
+  [...raw.replace(/\p{C}/gu, "").replace(/\s+/g, " ").trim()].slice(0, 64).join("")
+
+/** The name the user chose, or "" for the guessed one. */
+export function savedName(): string {
+  try {
+    return cleanName(localStorage.getItem(NAME_KEY) ?? "")
+  } catch {
+    return ""
+  }
+}
+
+/** Saves a name (blank restores the guessed one). Returns what is now in effect. */
+export function saveName(raw: string): string {
+  const name = cleanName(raw)
+  try {
+    if (name) localStorage.setItem(NAME_KEY, name)
+    else localStorage.removeItem(NAME_KEY)
+  } catch {
+    // private mode: the name just lasts until the tab closes
+  }
+  return deviceName()
+}
+
+/** What other devices see: the saved name, else a short label such as "Chrome 157 on Android". Best effort, never throws. */
 export function deviceName(
   ua = navigator.userAgent,
   brave = "brave" in navigator, // Brave's UA is identical to Chrome's; it only exposes navigator.brave
   touch = navigator.maxTouchPoints > 1,
 ): string {
+  const saved = savedName()
+  if (saved) return saved
   try {
     let browser = "Browser"
     for (const [re, name] of BROWSERS) {

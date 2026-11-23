@@ -27,11 +27,12 @@ import {
   IconDeviceDesktop,
   IconEye,
   IconEyeOff,
+  IconPencil,
   IconTerminal2,
   IconWifiOff,
   IconX,
 } from "@tabler/icons-react"
-import type { ComponentType } from "react"
+import { type ComponentType, useState } from "react"
 
 // First match wins: the browser's own logo, else the OS's, else a generic screen.
 const ICONS: [RegExp, ComponentType<{ className?: string }>][] = [
@@ -64,6 +65,7 @@ export function NearbyDevices({
   visible,
   connected,
   self,
+  onRename,
   setVisible,
   status,
   onPick,
@@ -73,7 +75,10 @@ export function NearbyDevices({
   connected: boolean
   /** This device's own name, shown as "You appear as". */
   self?: string
-  setVisible: (v: boolean) => void
+  /** Makes the name editable in place; leave out when the host has its own settings. */
+  onRename?: (name: string) => void
+  /** Shows the Visible/Hidden toggle; leave out when the host has its own. */
+  setVisible?: (v: boolean) => void
   /** The transfer to that device, if any. A live one turns the tile into a cancel button. */
   status?: (device: { id: string; name: string }) => TileStatus | undefined
   /** Tapped: send to it, or cancel it when its status is live. */
@@ -83,20 +88,26 @@ export function NearbyDevices({
     <Section
       title="Nearby devices"
       aside={
-        <Toggle
-          size="sm"
-          pressed={visible}
-          onPressedChange={setVisible}
-          aria-label="Let other devices on this network see this one"
-        >
-          {visible ? <IconEye data-icon="inline-start" /> : <IconEyeOff data-icon="inline-start" />}
-          {visible ? "Visible" : "Hidden"}
-        </Toggle>
+        setVisible && (
+          <Toggle
+            size="sm"
+            pressed={visible}
+            onPressedChange={setVisible}
+            aria-label="Let other devices on this network see this one"
+          >
+            {visible ? (
+              <IconEye data-icon="inline-start" />
+            ) : (
+              <IconEyeOff data-icon="inline-start" />
+            )}
+            {visible ? "Visible" : "Hidden"}
+          </Toggle>
+        )
       }
     >
       {self && (
         <p className="text-sm text-muted-foreground">
-          You appear as <span className="font-medium text-foreground">{self}</span>
+          You appear as <SelfName name={self} onRename={onRename} />
           {visible ? " to everyone on this network." : ", but only you can see the others."}
         </p>
       )}
@@ -104,7 +115,7 @@ export function NearbyDevices({
         <Empty className="gap-4 border-2 border-input border-dashed py-8">
           <EmptyHeader>
             {connected ? (
-              <Orb listening energy={0.35} className="mx-auto size-28" />
+              <Orb variant="calm" listening className="mx-auto size-28" />
             ) : (
               <EmptyMedia variant="icon" className="size-11 rounded-xl">
                 <IconWifiOff className="size-5" />
@@ -239,5 +250,44 @@ function Ring({ status }: { status?: TileStatus }) {
         )}
       />
     </svg>
+  )
+}
+
+/** The device's own name; with `onRename` a tap turns it into a field (Enter or leaving saves, Esc cancels, empty restores the default). */
+function SelfName({ name, onRename }: { name: string; onRename?: (name: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  if (!onRename) return <span className="font-medium text-foreground">{name}</span>
+  const done = (save: boolean) => {
+    if (save && draft !== null && draft.trim() !== name) onRename(draft)
+    setDraft(null)
+  }
+  if (draft === null)
+    return (
+      <button
+        type="button"
+        onClick={() => setDraft(name)}
+        aria-label={`Device name: ${name}. Change it`}
+        className="inline-flex items-center gap-1 font-medium text-foreground underline decoration-dotted underline-offset-4 hover:decoration-solid"
+      >
+        {name}
+        <IconPencil className="size-3.5 text-muted-foreground" />
+      </button>
+    )
+  return (
+    <input
+      autoFocus
+      value={draft}
+      maxLength={64}
+      placeholder="Device name"
+      aria-label="Device name"
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={(e) => e.target.select()}
+      onBlur={() => done(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") done(true)
+        if (e.key === "Escape") done(false)
+      }}
+      className="w-48 max-w-full border-b border-input bg-transparent font-medium text-foreground outline-none focus:border-ring"
+    />
   )
 }

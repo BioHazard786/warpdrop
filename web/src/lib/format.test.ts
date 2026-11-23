@@ -46,5 +46,11 @@ describe("format", () => {
     })
     expect(splitDevice("devbox (CLI v1.2.0)")).toEqual({ title: "devbox", detail: "CLI v1.2.0" })
     expect(splitDevice("Browser")).toEqual({ title: "Browser", detail: "" })
+    // names the user typed stay whole, even when they contain " on "
+    expect(splitDevice("Fedora on Linux stuff")).toEqual({
+      title: "Fedora on Linux stuff",
+      detail: "",
+    })
+    expect(splitDevice("Fedora oN Linux")).toEqual({ title: "Fedora oN Linux", detail: "" })
   })
 })

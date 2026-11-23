@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { useReceive } from "@/store/receive"
 import { useSend } from "@/store/send"
+import { deviceName, saveName } from "@/transfer/device"
 import { type Invite, NearbyLobby, type NearbyDevice } from "@/transfer/nearby"
 
 const KEY = "warpdrop.nearby.visible"
@@ -17,10 +18,14 @@ interface NearbyState {
   /** Listed to other devices on this network. Off still lets this device see them and send. */
   visible: boolean
   connected: boolean
+  /** What other devices see this one as. */
+  name: string
   devices: NearbyDevice[]
   /** Someone picked this device and wants to send; the user has not answered yet. */
   incoming: Invite | null
   setVisible(v: boolean): void
+  /** Changes the name others see; blank goes back to the guessed one. */
+  rename(name: string): void
   connect(): void
   disconnect(): void
   /** Close the prompt without answering (the sender gives up after a minute). */
@@ -60,8 +65,16 @@ export const useNearby = create<NearbyState>((set, get) => {
     lobby = null
     set({ connected: false, devices: [] })
   }
+  // the server fixes visibility and name at join time, so a change rejoins; the current list stays on screen until the new one arrives
+  const rejoin = () => {
+    if (!lobby) return
+    const old = lobby
+    join()
+    old.close()
+  }
   return {
     visible: wasVisible(),
+    name: deviceName(),
     connected: false,
     devices: [],
     incoming: null,
@@ -72,12 +85,11 @@ export const useNearby = create<NearbyState>((set, get) => {
         // private mode: the choice just won't be remembered
       }
       set({ visible })
-      if (lobby) {
-        // the server fixes visibility at join time, so rejoin; the current list stays on screen until the new one arrives
-        const old = lobby
-        join()
-        old.close()
-      }
+      rejoin()
+    },
+    rename(name) {
+      set({ name: saveName(name) })
+      rejoin()
     },
     connect() {
       if (!lobby) join()

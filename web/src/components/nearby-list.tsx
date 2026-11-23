@@ -2,7 +2,6 @@ import { NearbyDevices } from "@/components/nearby-devices"
 import { peerFor, tileStatus } from "@/lib/nearby-status"
 import { useNearby } from "@/store/nearby"
 import { useSend } from "@/store/send"
-import { deviceName } from "@/transfer/device"
 
 /** Choose files. The input is created on click, so the page keeps a single file input (the dropzone's). */
 export function pickFiles(onFiles: (files: File[]) => void) {
@@ -18,7 +17,7 @@ export function pickFiles(onFiles: (files: File[]) => void) {
 
 /** Devices on the same network. Tap one to send it the selected files (picking them first if there are none). */
 export function NearbyList() {
-  const { devices, visible, connected, setVisible, sendTo } = useNearby()
+  const { devices, visible, connected, name, rename, setVisible, sendTo } = useNearby()
   const invites = useSend((s) => (s.mode === "nearby" ? s.invites : undefined))
   const peers = useSend((s) => s.peers)
   return (
@@ -26,7 +25,8 @@ export function NearbyList() {
       devices={devices}
       visible={visible}
       connected={connected}
-      self={deviceName()}
+      self={name}
+      onRename={rename}
       setVisible={setVisible}
       status={(d) => tileStatus(invites?.[d.id], peers)}
       onPick={(d) => {
