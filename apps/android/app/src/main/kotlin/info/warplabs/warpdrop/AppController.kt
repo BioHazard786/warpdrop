@@ -12,11 +12,16 @@ import kotlinx.coroutines.launch
 class AppController(
     private val core: WarpCore,
     private val store: SettingsStore,
-    /** What other devices see, shown as "You'll appear as". */
-    val deviceName: String,
+    /** What other devices see until the user picks a name in Settings. */
+    val defaultName: String,
     private val scope: CoroutineScope,
 ) {
     val settings: StateFlow<Settings> = store.settings.stateIn(scope, SharingStarted.Eagerly, Settings())
+
+    private fun nameOf(s: Settings) = s.deviceName.ifBlank { defaultName }
+
+    /** What other devices see, shown as "You'll appear as". */
+    val deviceName: StateFlow<String> = settings.map(::nameOf).stateIn(scope, SharingStarted.Eagerly, defaultName)
 
     private val _picked = MutableStateFlow<List<PickedFile>>(emptyList())
     val picked: StateFlow<List<PickedFile>> = _picked
@@ -73,20 +78,20 @@ class AppController(
         startNearby(settings.value)
     }
 
-    private var nearbyServer = ""
+    private var nearbyKey = "" to ""
 
     private fun startNearby(s: Settings) {
-        nearbyServer = s.server
-        _nearby.value = core.startNearby(s, deviceName, s.nearbyVisible, ::incoming)
+        nearbyKey = s.server to nameOf(s)
+        _nearby.value = core.startNearby(s, nameOf(s), s.nearbyVisible, ::incoming)
     }
 
     init {
-        // The list lives on one server. The saved setting loads after the app has already joined (with the
-        // default), and the user can change it later: either way, rejoin on the right server.
+        // The list lives on one server and shows one name. The saved settings load after the app has already
+        // joined (with the defaults), and the user can change them later: either way, rejoin with the right ones.
         scope.launch {
             store.settings.collect { s ->
                 val n = _nearby.value ?: return@collect
-                if (s.server == nearbyServer) return@collect
+                if (s.server to nameOf(s) == nearbyKey) return@collect
                 n.stop()
                 startNearby(s)
             }
@@ -126,7 +131,11 @@ class AppController(
         _picked.update { cur -> cur + files.filter { f -> cur.none { it.name == f.name && it.size == f.size } } }
     }
 
-    fun removeFile(file: PickedFile) = _picked.update { it - file }
+    /** Removing the last file also wipes the finished nearby sends, so the tiles and the Transfers list start fresh. */
+    fun removeFile(file: PickedFile) {
+        _picked.update { it - file }
+        if (_picked.value.isEmpty() && !sendingNearby.value) _nearbySends.value = emptyMap()
+    }
 
     /** Clears the picked files and the finished nearby sends (refused while one is still running). */
     fun clearFiles() {
@@ -138,12 +147,12 @@ class AppController(
     fun startSend() {
         val files = _picked.value
         if (files.isEmpty() || _send.value != null) return
-        _send.value = core.startSend(files, settings.value, deviceName)
+        _send.value = core.startSend(files, settings.value, deviceName.value)
     }
 
     /** [code] is a share code or a link, exactly as typed, scanned or tapped. */
     fun startReceive(code: String) {
-        _receives.update { it + core.startReceive(code.trim(), settings.value, deviceName) }
+        _receives.update { it + core.startReceive(code.trim(), settings.value, deviceName.value) }
     }
 
     /** Leaves the send screen (stopping the share). The picked files are cleared once the share is over. */

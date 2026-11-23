@@ -85,7 +85,7 @@ private fun PickPage(controller: AppController, platform: Platform) {
     ) {
         SectionHeader("You'll appear as")
         ThisDevice(
-            controller.deviceName,
+            controller.deviceName.collectAsState().value,
             when {
                 mode == SendMode.Code -> "Shown to whoever enters your code"
                 nearby.visible -> "Visible to devices on this network"

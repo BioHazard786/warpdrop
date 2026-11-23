@@ -212,11 +212,19 @@ fun transportLabel(transport: String) = when (transport) {
     else -> ""
 }
 
-/** "Pixel 8 on Android" -> Pixel 8 / Android, "box (CLI 1.2)" -> box / CLI 1.2: the web app's split of a device label. */
+/**
+ * "Pixel 8 on Android" -> Pixel 8 / Android, "box (CLI 1.2)" -> box / CLI 1.2: the web app's split of a device label.
+ * Only the automatic " on <OS>" form splits, so a name the user typed ("Fedora on my desk") stays whole.
+ */
 fun deviceTitle(name: String): Pair<String, String> {
-    val m = Regex(" on ([^()]+)$").find(name) ?: Regex(" \\((CLI[^)]*)\\)$").find(name)
+    val m = Regex(" on (Android|iOS|iPadOS|Windows|macOS|Linux|ChromeOS|device)$").find(name) ?: Regex(" \\((CLI[^)]*)\\)$").find(name)
     return if (m == null) name to "" else name.substring(0, m.range.first) to m.groupValues[1]
 }
+
+const val MAX_NAME = 64
+
+/** A typed device name as it goes on the wire: no control characters, one space between words, at most [MAX_NAME]. */
+fun cleanName(raw: String) = raw.filterNot { it.isISOControl() }.trim().replace(Regex("\\s+"), " ").take(MAX_NAME)
 
 /** The 6-digit nearby code to compare with the other screen, in two groups so it reads aloud: 482 193. */
 @Composable

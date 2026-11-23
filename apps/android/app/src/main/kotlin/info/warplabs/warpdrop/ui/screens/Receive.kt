@@ -32,7 +32,7 @@ fun ReceiveTab(controller: AppController, platform: Platform) {
         )
     }) {
         SectionHeader("You'll appear as")
-        VisibilityRow(controller.deviceName, nearby.visible, nearby.server) { controller.setVisible(!nearby.visible) }
+        VisibilityRow(controller.deviceName.collectAsState().value, nearby.visible, nearby.server) { controller.setVisible(!nearby.visible) }
         SectionHeader("Enter a code")
         CodeField(controller::startReceive)
     }

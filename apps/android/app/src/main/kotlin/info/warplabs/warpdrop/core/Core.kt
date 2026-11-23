@@ -20,6 +20,8 @@ data class Settings(
     val dynamicColor: Boolean = true,
     /** Listed to other devices on the network. Off still lets this device see them and send. */
     val nearbyVisible: Boolean = true,
+    /** What other devices see; blank means the default ("Pixel 8 on Android"). */
+    val deviceName: String = "",
 )
 
 interface SettingsStore {

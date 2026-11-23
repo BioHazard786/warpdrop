@@ -19,6 +19,7 @@ class DataStoreSettings(private val context: Context) : SettingsStore {
     private val theme = stringPreferencesKey("theme")
     private val dynamic = booleanPreferencesKey("dynamic_color")
     private val visible = booleanPreferencesKey("nearby_visible")
+    private val name = stringPreferencesKey("device_name")
 
     override val settings: Flow<Settings> = context.dataStore.data.map {
         Settings(
@@ -27,6 +28,7 @@ class DataStoreSettings(private val context: Context) : SettingsStore {
             theme = it[theme]?.let { t -> ThemeMode.entries.firstOrNull { m -> m.name == t } } ?: ThemeMode.System,
             dynamicColor = it[dynamic] ?: true,
             nearbyVisible = it[visible] ?: true,
+            deviceName = it[name] ?: "",
         )
     }
 
@@ -37,6 +39,7 @@ class DataStoreSettings(private val context: Context) : SettingsStore {
             it[theme] = settings.theme.name
             it[dynamic] = settings.dynamicColor
             it[visible] = settings.nearbyVisible
+            it[name] = settings.deviceName
         }
     }
 }

@@ -48,6 +48,9 @@ fun SettingsTab(controller: AppController) {
 
     when (dialog) {
         "server" -> ServerDialog(settings.server, onDismiss = { dialog = null }) { save(settings.copy(server = it)); dialog = null }
+        "name" -> NameDialog(settings.deviceName, controller.defaultName, onDismiss = { dialog = null }) {
+            save(settings.copy(deviceName = it)); dialog = null
+        }
         "theme" -> ChoiceDialog("Theme", ThemeMode.entries, settings.theme, { it.label }, { dialog = null }) {
             save(settings.copy(theme = it)); dialog = null
         }
@@ -72,7 +75,7 @@ private fun SettingsPage(controller: AppController, settings: Settings, save: (S
             ) { save(settings.copy(dynamicColor = !settings.dynamicColor)) } else null,
         ))
         Group("About", listOf(
-            Item(R.drawable.ic_smartphone, "Device name", controller.deviceName, onClick = null),
+            Item(R.drawable.ic_smartphone, "Device name", controller.deviceName.collectAsState().value) { openDialog("name") },
             Item(R.drawable.ic_info, "About Warpdrop", "Version ${BuildConfig.VERSION_NAME}", onClick = onAbout),
         ))
     }
@@ -147,6 +150,28 @@ private fun ServerDialog(current: String, onDismiss: () -> Unit, onSave: (String
             )
         },
         confirmButton = { TextButton(onClick = { onSave(server.trim()) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Blank restores the default name. Others see exactly what is typed here, so keep it short and plain. */
+@Composable
+private fun NameDialog(current: String, default: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var name by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Glyph(R.drawable.ic_smartphone) },
+        title = { Text("Device name") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it.take(MAX_NAME) },
+                placeholder = { Text(default) },
+                supportingText = { Text("What other devices see. Leave empty for the default.") },
+                singleLine = true,
+            )
+        },
+        confirmButton = { TextButton(onClick = { onSave(cleanName(name)) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
