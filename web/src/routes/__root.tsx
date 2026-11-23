@@ -13,14 +13,16 @@ export const Route = createRootRoute({
 })
 
 function Root() {
-  // a receiver landed here for one transfer: the headline is about that, not the product
-  const receiving = useLocation({ select: (l) => l.pathname.startsWith("/r/") })
+  // a receiver landed here for one transfer, and About has its own intro: the product headline fits neither
+  const ownHero = useLocation({
+    select: (l) => l.pathname.startsWith("/r/") || l.pathname === "/about",
+  })
   return (
     <Toaster>
       <div className="flex min-h-svh flex-col">
         <ThemeToggle />
         <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-4 pt-16 pb-16 sm:px-6 sm:pt-20">
-          {!receiving && (
+          {!ownHero && (
             <section className="flex flex-col gap-5">
               <AsciiLogo />
               <div className="flex flex-col gap-2">

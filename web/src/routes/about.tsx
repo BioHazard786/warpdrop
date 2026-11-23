@@ -1,3 +1,4 @@
+import { AsciiLogo } from "@/components/ascii-logo"
 import { Section } from "@/components/section"
 import { IconBrandGithub, IconExternalLink } from "@tabler/icons-react"
 import { fetchConfig } from "@/transfer/signaling"
@@ -5,11 +6,7 @@ import { createFileRoute } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/about")({
   // the web app is embedded in the server, so the server's version is the app's version
-  loader: () =>
-    fetchConfig().then(
-      (c) => c.version,
-      () => undefined,
-    ),
+  loader: () => fetchConfig().catch(() => undefined),
   component: About,
 })
 
@@ -64,9 +61,23 @@ const APPS: App[] = [
 const link = "inline-flex items-center gap-1 underline underline-offset-4 hover:text-foreground"
 
 function About() {
-  const version = Route.useLoaderData()
+  const config = Route.useLoaderData()
+  const turn = config?.iceServers.some((s) => s.username)
   return (
     <>
+      <section className="flex flex-col gap-5">
+        <AsciiLogo />
+        <div className="flex flex-col gap-2">
+          <h1 className="font-serif text-2xl tracking-tight text-balance sm:text-3xl">
+            Small tools that do one thing well.
+          </h1>
+          <p className="text-base leading-relaxed text-pretty text-muted-foreground">
+            Warp is a family of open-source, self-hostable utilities. Use the hosted versions, or
+            run your own with a single container.
+          </p>
+        </div>
+      </section>
+
       <Section title="The Warp family">
         <ul className="flex flex-col gap-3">
           {APPS.map((app) => (
@@ -98,19 +109,29 @@ function About() {
         </ul>
       </Section>
 
-      <Section title="Version">
-        <p className="font-mono text-sm text-muted-foreground">WarpDrop {version ?? "unknown"}</p>
-      </Section>
-
       <Section title="The developer">
         <p className="text-sm leading-relaxed text-muted-foreground">
           Built and maintained by Mohd Zaid (
           <a href={GITHUB} target="_blank" rel="noreferrer" className={link}>
             @BioHazard786
           </a>
-          ). Warp is a family of open-source, self-hostable utilities: use the hosted versions, or
-          run your own. Bug reports, ideas and pull requests are welcome.
+          ). Everything here is open source: bug reports, ideas and pull requests are welcome.
         </p>
+      </Section>
+
+      <Section title="This server" aside={config?.version}>
+        {config ? (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 font-mono text-xs">
+            <dt className="text-muted-foreground">relay fallback</dt>
+            <dd>{config.relay ? "on" : "off"}</dd>
+            <dt className="text-muted-foreground">TURN server</dt>
+            <dd>{turn ? "on" : "off"}</dd>
+            <dt className="text-muted-foreground">receivers per share</dt>
+            <dd>{config.maxReceivers}</dd>
+          </dl>
+        ) : (
+          <p className="font-mono text-xs text-muted-foreground">Server info unavailable.</p>
+        )}
       </Section>
     </>
   )
