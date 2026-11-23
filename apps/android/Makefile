@@ -1,5 +1,5 @@
 # Builds the Go core into app/libs/warpcore.aar. Needs: Go, the Android NDK, and gomobile
-#   android sdk install ndk/30.0.16248370 && go install golang.org/x/mobile/cmd/gomobile@latest
+#   android sdk install ndk/30.0.16248370 && go install golang.org/x/mobile/cmd/gomobile@latest golang.org/x/mobile/cmd/gobind@latest
 NDK ?= $(HOME)/Android/Sdk/ndk/30.0.16248370
 ABIS ?= android/arm64,android/arm
 GOBIN := $(shell go env GOPATH)/bin

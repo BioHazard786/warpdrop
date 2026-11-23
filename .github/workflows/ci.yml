@@ -103,7 +103,7 @@ jobs:
           packages: "" # the default "tools" package no longer exists and fails the install; the runner already has the SDK
       - name: SDK platform and NDK (the NDK builds the Go core)
         run: sdkmanager "platforms;android-37.2" "ndk;30.0.16248370"
-      - run: go install golang.org/x/mobile/cmd/gomobile@latest
+      - run: go install golang.org/x/mobile/cmd/gomobile@latest golang.org/x/mobile/cmd/gobind@latest
       - name: Build the Go core (apps/android/app/libs/warpcore.aar)
         run: make core NDK="$ANDROID_HOME/ndk/30.0.16248370"
         working-directory: apps/android

@@ -105,7 +105,7 @@ jobs:
         with:
           packages: "" # the default "tools" package no longer exists and fails the install; the runner already has the SDK
       - run: sdkmanager "platforms;android-37.2" "ndk;30.0.16248370"
-      - run: go install golang.org/x/mobile/cmd/gomobile@latest
+      - run: go install golang.org/x/mobile/cmd/gomobile@latest golang.org/x/mobile/cmd/gobind@latest
       - run: make core NDK="$ANDROID_HOME/ndk/30.0.16248370"
         working-directory: apps/android
       - uses: gradle/actions/setup-gradle@v5
