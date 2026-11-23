@@ -25,7 +25,23 @@ const LABEL: Record<Peer["status"], string> = {
   failed: "Failed",
 }
 
-export function PeerRow({ peer, onCancel }: { peer: Peer; onCancel: () => void }) {
+// The desktop app shows its downloads with this row too: same states, receiving-side words.
+const INCOMING: Partial<Record<Peer["status"], string>> = {
+  waiting: "Offered",
+  sending: "Receiving",
+  done: "Received",
+}
+
+export function PeerRow({
+  peer,
+  onCancel,
+  incoming = false,
+}: {
+  peer: Peer
+  onCancel: () => void
+  /** The files are coming to this device. */
+  incoming?: boolean
+}) {
   const pct = peer.total
     ? Math.min(100, (peer.sent / peer.total) * 100)
     : peer.status === "done"
@@ -53,7 +69,9 @@ export function PeerRow({ peer, onCancel }: { peer: Peer; onCancel: () => void }
             </>
           ) : peer.status === "waiting" ? (
             <>
-              <span className="shimmer">Waiting for them to accept</span>
+              <span className="shimmer">
+                {incoming ? "Waiting for you to accept" : "Waiting for them to accept"}
+              </span>
               {peer.sas && <> · code {formatCode(peer.sas)}</>}
             </>
           ) : peer.status === "done" ? (
@@ -77,14 +95,14 @@ export function PeerRow({ peer, onCancel }: { peer: Peer; onCancel: () => void }
           }
         >
           {busy && <Spinner data-icon="inline-start" />}
-          {LABEL[peer.status]}
+          {(incoming && INCOMING[peer.status]) || LABEL[peer.status]}
         </Badge>
         {live && (
           <Button
             variant="ghost"
             size="icon-sm"
             onClick={onCancel}
-            aria-label={`Cancel transfer to ${peer.device}`}
+            aria-label={`Cancel transfer ${incoming ? "from" : "to"} ${peer.device}`}
           >
             <IconX />
           </Button>

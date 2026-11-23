@@ -1,5 +1,5 @@
 import { FileList } from "@/components/file-list"
-import { CrystalBall } from "@/components/crystal-ball"
+import { Orb } from "@/components/orb"
 import { Section } from "@/components/section"
 import { TransportBadge } from "@/components/transport-badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -133,7 +133,7 @@ function ReceivePage() {
     )
     return (
       <div className="flex flex-col items-center gap-8 py-4">
-        <CrystalBall speed={0.6 + at * 0.3} className="size-44 sm:size-52" />
+        <Orb variant="ember" energy={0.4 + at * 0.25} className="size-44 sm:size-52" />
         <div className="flex flex-col items-center gap-4">
           <p className="text-sm text-muted-foreground">
             Transfer <span className="font-mono text-foreground">{roomId}</span>
