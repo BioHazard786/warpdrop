@@ -74,6 +74,25 @@ Behind a proxy, rate limiting is only per real user if `TRUSTED_PROXIES` is corr
 
 **The Nearby list depends on this too.** It groups browsers and apps by public IP, and treats private addresses as one shared "home network". If `TRUSTED_PROXIES` doesn't match your proxy, every visitor looks like the proxy's private address and **strangers will see each other in the Nearby list** (up to 50 per list). Check it after deploying: open the site from two networks (for example Wi-Fi and a phone on mobile data) and confirm they do not list each other. Nearby sockets use `/ws?lobby=1`, the same path as signaling, so no proxy change is needed.
 
+**Behind Cloudflare's proxy (orange cloud).** Cloudflare puts its own edge address in front of your proxy, so the logs show `104.x` / `172.64-71.x` addresses and Nearby sees nobody on your Wi-Fi. Add Cloudflare's ranges to `TRUSTED_PROXIES` (keep the defaults), so the server walks past them to the real client in `X-Forwarded-For`:
+
+```bash
+# .env, then `docker compose up -d`. The current list is at https://www.cloudflare.com/ips-v4 and /ips-v6
+TRUSTED_PROXIES=127.0.0.1,172.16.0.0/12,173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32
+```
+
+Your host proxy must keep the incoming `X-Forwarded-For` and append to it: nginx's `$proxy_add_x_forwarded_for` (see `deploy/nginx.conf.sample`) does. Caddy replaces it unless Cloudflare is trusted, so add this to the top of the Caddyfile:
+
+```
+{
+	servers {
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+	}
+}
+```
+
+Only let Cloudflare (or your proxy) reach the origin, or anyone could forge `X-Forwarded-For`. Check with `docker compose logs`: the `ip` in `nearby joined` should now be your real public address, the same for two devices on one Wi-Fi.
+
 ## 4. TURN (optional)
 
 You usually don't need it: when a direct connection fails, WarpDrop automatically relays through the app itself, with the same end-to-end encryption. Run TURN only if you want to keep transfers peer-to-peer across strict NATs, or to take relay bandwidth off the app server.

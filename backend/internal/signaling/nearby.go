@@ -69,7 +69,7 @@ func (h *Hub) nearbyJoin(c *Client, m in) {
 		}
 	}
 	l[p.id], c.lobby = c, p
-	slog.Info("nearby joined", "ip", c.ip, "peers", len(l))
+	slog.Info("nearby joined", "ip", c.ip, "device", p.device, "hidden", p.hidden, "network", net, "peers", len(l))
 	c.send(msg(map[string]any{"t": "nearby_joined", "peer_id": p.id, "devices": devices}))
 	if !p.hidden {
 		joined := msg(map[string]any{"t": "nearby_peer", "peer": peerInfo(p)})
@@ -94,6 +94,7 @@ func (h *Hub) nearbyLeave(c *Client) {
 	c.lobby = nil
 	l := h.lobbies[p.net]
 	delete(l, p.id)
+	slog.Info("nearby left", "ip", c.ip, "device", p.device, "network", p.net, "peers", len(l))
 	if len(l) == 0 {
 		delete(h.lobbies, p.net)
 		return

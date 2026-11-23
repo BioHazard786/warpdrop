@@ -12,3 +12,5 @@ drop.warplabs.info {
 		}
 	}
 }
+
+# Behind Cloudflare's proxy? Also trust its ranges here, see DEPLOY.md "Behind Cloudflare".
