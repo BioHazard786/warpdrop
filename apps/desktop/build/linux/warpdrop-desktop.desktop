@@ -1,10 +1,13 @@
 [Desktop Entry]
 Type=Application
-Name=warpdrop-desktop
+Name=WarpDrop
 Exec=warpdrop-desktop
 Icon=warpdrop-desktop
-Categories=Development;
+Categories=Network;FileTransfer;
+Comment=Send files to nearby devices or with a share code
 Terminal=false
-Keywords=wails
+Keywords=share;send;receive;transfer;files;nearby;
 Version=1.0
+GenericName=File Transfer
 StartupNotify=false
+StartupWMClass=com.biohazard786.warpdrop

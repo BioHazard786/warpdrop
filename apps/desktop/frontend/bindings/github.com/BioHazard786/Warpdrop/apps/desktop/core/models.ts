@@ -16,7 +16,26 @@ export interface File {
     "size": number;
 }
 
+/**
+ * Settings is what the Settings page saves. Empty fields use the defaults.
+ */
+export interface Settings {
+    "device": string;
+    "dir": string;
+
+    /**
+     * "" = the default (WARPDROP_SERVER or the hosted one)
+     */
+    "server": string;
+}
+
 export interface State {
+    "version": string;
+
+    /**
+     * what the Settings page edits: the device name and folder in use, the saved server
+     */
+    "settings": Settings;
     "device": string;
     "dir": string;
     "visible": boolean;
@@ -76,4 +95,14 @@ export interface Transfer {
     "files": File[] | null;
     "error": string;
     "done": boolean;
+
+    /**
+     * unix ms
+     */
+    "started": number;
+
+    /**
+     * Paths are where received files were saved, by file index: a clash gets "name (1).ext", so not always Files' names.
+     */
+    "paths": string[] | null;
 }

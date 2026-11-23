@@ -9,6 +9,7 @@ export {
 export type {
     Device,
     File,
+    Settings,
     State,
     Transfer
 } from "./models.js";

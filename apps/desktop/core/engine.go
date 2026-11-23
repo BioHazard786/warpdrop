@@ -42,9 +42,14 @@ type Transfer struct {
 	Files     []File `json:"files"`
 	Error     string `json:"error"`
 	Done      bool   `json:"done"`
+	Started   int64  `json:"started"` // unix ms
+	// Paths are where received files were saved, by file index: a clash gets "name (1).ext", so not always Files' names.
+	Paths []string `json:"paths"`
 }
 
 type State struct {
+	Version   string     `json:"version"`
+	Settings  Settings   `json:"settings"` // what the Settings page edits: the device name and folder in use, the saved server
 	Device    string     `json:"device"`
 	Dir       string     `json:"dir"`
 	Visible   bool       `json:"visible"`
@@ -53,10 +58,13 @@ type State struct {
 	Transfers []Transfer `json:"transfers"`
 }
 
+// Config holds the defaults; anything saved on the Settings page wins over them.
 type Config struct {
-	Server string // "" = WARPDROP_SERVER or the hosted one
+	Server string // "" = the hosted one
 	Dir    string // where received files go, default ~/Downloads
 	Device string // the name other devices see, default "<host> on <OS>"
+	// StateDir keeps settings and finished transfers across restarts; "" keeps nothing (tests).
+	StateDir string
 }
 
 type rec struct {
@@ -67,12 +75,17 @@ type rec struct {
 }
 
 type Engine struct {
-	emit   func(event string, data any)
-	server string
-	device string
-	sink   *mobile.DirSink
+	emit     func(event string, data any)
+	base     Config
+	stateDir string
+	saveMu   sync.Mutex // one writer at a time for the state files
 
 	mu        sync.Mutex
+	server    string
+	device    string
+	sink      *mobile.DirSink
+	oldSinks  []*mobile.DirSink // folders switched away from: receives may still be writing there, closed on Shutdown
+	saved     Settings
 	visible   bool
 	nearby    *mobile.NearbyJob
 	serverErr string
@@ -82,27 +95,62 @@ type Engine struct {
 	seq       int
 }
 
-// New opens the download folder. Nothing runs until Start.
+// New opens the download folder and loads saved settings and history. Nothing runs until Start.
 func New(c Config, emit func(event string, data any)) (*Engine, error) {
-	if c.Dir == "" {
+	e := &Engine{emit: emit, base: c, stateDir: c.StateDir, transfers: map[string]*rec{}}
+	e.readJSON(settingsFile, &e.saved)
+	eff, err := e.effective(e.saved)
+	if err != nil {
+		return nil, err
+	}
+	sink, err := mobile.NewDirSink(eff.Dir)
+	if err != nil && e.saved.Dir != "" { // the saved folder is gone (an unplugged drive): fall back to the default
+		e.saved.Dir = ""
+		if eff, err = e.effective(e.saved); err == nil {
+			sink, err = mobile.NewDirSink(eff.Dir)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	e.server, e.device, e.sink = eff.Server, eff.Device, sink
+	e.loadHistory()
+	return e, nil
+}
+
+// effective fills what s leaves empty from the defaults.
+func (e *Engine) effective(s Settings) (Settings, error) {
+	if s.Server == "" {
+		s.Server = e.base.Server
+	}
+	if s.Dir == "" {
+		s.Dir = e.base.Dir
+	}
+	if s.Dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil, err
+			return s, err
 		}
-		c.Dir = filepath.Join(home, "Downloads")
+		s.Dir = filepath.Join(home, "Downloads")
 	}
-	if c.Device == "" {
+	if s.Device == "" {
+		s.Device = e.base.Device
+	}
+	if s.Device == "" {
 		host, _ := os.Hostname()
 		if host == "" {
 			host = "desktop"
 		}
-		c.Device = host + " on " + map[string]string{"linux": "Linux", "windows": "Windows", "darwin": "macOS"}[runtime.GOOS]
+		s.Device = host + " on " + map[string]string{"linux": "Linux", "windows": "Windows", "darwin": "macOS"}[runtime.GOOS]
 	}
-	sink, err := mobile.NewDirSink(c.Dir)
-	if err != nil {
-		return nil, err
-	}
-	return &Engine{emit: emit, server: c.Server, device: c.Device, sink: sink, transfers: map[string]*rec{}}, nil
+	return s, nil
+}
+
+// conn is what a new job needs, read under the lock because Settings can change them.
+func (e *Engine) conn() (server, device string, sink *mobile.DirSink) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.server, e.device, e.sink
 }
 
 // Start makes this device visible on the network and starts looking for others.
@@ -125,13 +173,20 @@ func (e *Engine) Shutdown() {
 	for _, c := range cancels {
 		c()
 	}
-	_ = e.sink.Close()
+	e.mu.Lock()
+	sinks := append(e.oldSinks, e.sink)
+	e.mu.Unlock()
+	for _, s := range sinks {
+		_ = s.Close()
+	}
 }
 
 func (e *Engine) State() State {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	s := State{Device: e.device, Dir: e.sink.Dir(), Visible: e.visible, Server: e.serverErr, Devices: append([]Device{}, e.devices...), Transfers: []Transfer{}}
+	set := e.saved
+	set.Device, set.Dir = e.device, e.sink.Dir()
+	s := State{Version: Version, Settings: set, Device: e.device, Dir: e.sink.Dir(), Visible: e.visible, Server: e.serverErr, Devices: append([]Device{}, e.devices...), Transfers: []Transfer{}}
 	for _, id := range e.order {
 		s.Transfers = append(s.Transfers, e.transfers[id].t)
 	}
@@ -197,9 +252,10 @@ func (l *nearbyEvents) OnServer(err string) {
 func (l *nearbyEvents) OnInvite(_, _, roomID, ticket string) {
 	r := &receiver{e: l.e}
 	r.begin()
-	job := mobile.NewReceiveJob(l.e.server, l.e.device, false)
+	server, device, sink := l.e.conn()
+	job := mobile.NewReceiveJob(server, device, false)
 	l.e.setCancel(r.cur, job.Cancel)
-	job.StartNearby(roomID, ticket, l.e.sink, r)
+	job.StartNearby(roomID, ticket, sink, r)
 }
 
 func (l *nearbyEvents) OnEnd(string) {}
@@ -217,7 +273,10 @@ func (h lanHandler) Listener(id string) mobile.ReceiveListener {
 	return r
 }
 
-func (h lanHandler) Sink(string) mobile.Sink { return h.e.sink }
+func (h lanHandler) Sink(string) mobile.Sink {
+	_, _, sink := h.e.conn()
+	return sink
+}
 
 // ---- transfers
 
@@ -226,7 +285,7 @@ func (e *Engine) add(kind string, files []File, cancel func()) string {
 	e.seq++
 	id := fmt.Sprintf("t%d", e.seq)
 	r := &rec{cancel: cancel, decide: make(chan bool, 1)}
-	r.t = Transfer{ID: id, Kind: kind, Status: "connecting", Files: files, Total: sum(files)}
+	r.t = Transfer{ID: id, Kind: kind, Status: "connecting", Files: files, Total: sum(files), Started: time.Now().UnixMilli()}
 	e.transfers[id] = r
 	e.order = append(e.order, id)
 	t := r.t
@@ -253,6 +312,9 @@ func (e *Engine) update(id string, f func(*rec)) {
 	t := r.t
 	e.mu.Unlock()
 	e.emit("transfer", t)
+	if t.Done { // happens once per transfer: a finished one is never updated again
+		e.saveHistory()
+	}
 }
 
 func sum(fs []File) (n int64) {
@@ -308,9 +370,9 @@ func (e *Engine) send(paths []string, deviceID string) (string, error) {
 		return "", err
 	}
 	e.mu.Lock()
-	n := e.nearby
+	n, server, device := e.nearby, e.server, e.device
 	e.mu.Unlock()
-	job := mobile.NewSendJob(e.server, e.device, false)
+	job := mobile.NewSendJob(server, device, false)
 	for _, p := range paths {
 		if err := job.AddPath(p); err != nil {
 			job.Cancel()
@@ -397,9 +459,10 @@ func (e *Engine) finish(id, err string) {
 func (e *Engine) ReceiveCode(code string) (string, error) {
 	r := &receiver{e: e}
 	r.begin()
-	job := mobile.NewReceiveJob(e.server, e.device, false)
+	server, device, sink := e.conn()
+	job := mobile.NewReceiveJob(server, device, false)
 	e.setCancel(r.cur, job.Cancel)
-	job.Start(code, e.sink, r)
+	job.Start(code, sink, r)
 	return r.cur, nil
 }
 
@@ -463,6 +526,16 @@ func (r *receiver) OnProgress(idx int32, n int64) {
 
 func (r *receiver) OnFileDone(int32) {}
 
+// OnSaved records where file idx is being written, for "Show in folder" once it's done.
+func (r *receiver) OnSaved(idx int32, path string) {
+	r.e.update(r.cur, func(x *rec) {
+		for len(x.t.Paths) <= int(idx) {
+			x.t.Paths = append(x.t.Paths, "")
+		}
+		x.t.Paths[idx] = path
+	})
+}
+
 func (r *receiver) OnEnd(err string) {
 	if r.cur == "" {
 		return
@@ -520,4 +593,5 @@ func (e *Engine) Dismiss(id string) {
 	}
 	e.mu.Unlock()
 	e.emit("dismissed", id)
+	e.saveHistory()
 }

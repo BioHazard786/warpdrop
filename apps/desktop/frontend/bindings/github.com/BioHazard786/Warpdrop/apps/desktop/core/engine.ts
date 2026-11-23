@@ -45,6 +45,13 @@ export function Respond(id: string, accept: boolean): $CancellablePromise<void> 
 }
 
 /**
+ * SaveSettings checks, applies and saves settings. A new name or server restarts discovery so others see the change.
+ */
+export function SaveSettings(s: $models.Settings): $CancellablePromise<void> {
+    return $Call.ByID(3511459225, s);
+}
+
+/**
  * SendToDevice sends files to a device from the nearby list and returns the transfer id.
  */
 export function SendToDevice(deviceID: string, paths: string[] | null): $CancellablePromise<string> {

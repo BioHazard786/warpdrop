@@ -93,7 +93,10 @@ func TestSendToNearbyDeviceAndAccept(t *testing.T) {
 	rcv.Respond(offer.ID, true)
 
 	srec.waitFor(t, "sender done", func(x Transfer) bool { return x.Status == "done" })
-	rrec.waitFor(t, "receiver done", func(x Transfer) bool { return x.Status == "done" && x.Done })
+	done := rrec.waitFor(t, "receiver done", func(x Transfer) bool { return x.Status == "done" && x.Done })
+	if want := filepath.Join(rdir, "d.bin"); len(done.Paths) != 1 || done.Paths[0] != want {
+		t.Errorf("saved paths = %q, want [%q]", done.Paths, want)
+	}
 	got, err := os.ReadFile(filepath.Join(rdir, "d.bin"))
 	if err != nil || !bytes.Equal(got, data) {
 		t.Fatalf("file not saved: %v", err)

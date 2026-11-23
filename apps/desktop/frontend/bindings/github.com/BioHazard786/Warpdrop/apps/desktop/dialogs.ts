@@ -15,8 +15,22 @@ export function PickFiles(): $CancellablePromise<string[] | null> {
 }
 
 /**
- * Reveal opens a folder (or shows a file) in the system file manager.
+ * PickFolder asks where received files should go; "" when cancelled.
+ */
+export function PickFolder(): $CancellablePromise<string> {
+    return $Call.ByID(1914159682);
+}
+
+/**
+ * Reveal opens a folder in the file manager, or a file in its default app.
  */
 export function Reveal(path: string): $CancellablePromise<void> {
     return $Call.ByID(4209003034, path);
+}
+
+/**
+ * ShowFile opens the file manager with the file selected, or just its folder where that isn't possible.
+ */
+export function ShowFile(path: string): $CancellablePromise<void> {
+    return $Call.ByID(1814157884, path);
 }
